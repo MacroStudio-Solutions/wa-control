@@ -1,0 +1,29 @@
+{
+  "name": "wa-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.9",
+  "bin": {
+    "wa": "./src/main.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "start": "bun run src/main.ts",
+    "build": "mkdir -p dist && bun build ./src/main.ts --target=bun --compile --outfile ./dist/wa",
+    "install:local": "bash ./scripts/install-local.sh",
+    "check": "bunx tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.2"
+  }
+}
