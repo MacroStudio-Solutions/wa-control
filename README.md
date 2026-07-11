@@ -1,6 +1,6 @@
 # wa-control
 
-CLI local-first para operar sessoes do WhatsApp a partir de um unico binario Bun, seguindo o PRD em [prd-project-wa-control.md](./prd-project-wa-control.md).
+CLI local-first para operar sessoes do WhatsApp a partir de um unico binario Bun, seguindo o PRD em [.studio/docs/prd-project-wa-control.md](.studio/docs/prd-project-wa-control.md).
 
 ## Estado atual
 
@@ -81,6 +81,6 @@ O instalador copia o binario para `~/.local/bin/wa`. Se `~/.local/bin` ainda nao
 
 ## Etapas
 
-O detalhamento atualizado das fases esta em [docs/etapas.md](./docs/etapas.md).
+O detalhamento atualizado das fases esta em [.studio/docs//etapas.md](./.studio/docs//etapas.md).
 
-O roteiro de validacao manual com uma conta real esta em [docs/homologacao.md](./docs/homologacao.md).
+O roteiro de validacao manual com uma conta real esta em [.studio/docs//homologacao.md](./.studio/docs//homologacao.md).
