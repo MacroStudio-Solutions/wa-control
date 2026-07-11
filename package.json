@@ -11,6 +11,9 @@
     "dev": "bun run src/main.ts",
     "start": "bun run src/main.ts",
     "build": "mkdir -p dist && bun build ./src/main.ts --target=bun --compile --outfile ./dist/wa",
+    "build:release": "bash ./scripts/build-release.sh all",
+    "build:release:linux-x64": "bash ./scripts/build-release.sh linux-x64",
+    "build:release:windows-x64": "bash ./scripts/build-release.sh windows-x64",
     "install:local": "bash ./scripts/install-local.sh",
     "check": "bunx tsc --noEmit",
     "test": "bun test"

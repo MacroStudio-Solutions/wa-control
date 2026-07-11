@@ -54,6 +54,21 @@ Para gerar o binario local:
 bun run build
 ```
 
+Para gerar artefatos de distribuicao para usuarios finais sem ambiente dev:
+
+```bash
+bun run build:release:linux-x64
+bun run build:release:windows-x64
+bun run build:release
+```
+
+Os artefatos ficam em `dist/release/`:
+
+- `wa-control-v<versao>-linux-x64/wa`
+- `wa-control-v<versao>-linux-x64.tar.gz`
+- `wa-control-v<versao>-windows-x64/wa.exe`
+- `wa-control-v<versao>-windows-x64.zip`
+
 Para compilar e instalar o binario no ambiente do usuario:
 
 ```bash
