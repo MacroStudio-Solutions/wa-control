@@ -232,6 +232,43 @@ export class LocalApiClient {
     return this.requestJson<WebhookRecord[]>(`/webhooks${query}`);
   }
 
+  async setWebhookEvents(id: string, events: readonly string[]): Promise<WebhookRecord> {
+    return this.requestJson<WebhookRecord>(
+      `/webhooks/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ events })
+      },
+      true
+    );
+  }
+
+  async setWebhookEnabled(id: string, enabled: boolean): Promise<WebhookRecord> {
+    return this.requestJson<WebhookRecord>(
+      `/webhooks/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ enabled })
+      },
+      true
+    );
+  }
+
+  async toggleWebhookEvent(
+    id: string,
+    event: string,
+    enabled: boolean
+  ): Promise<WebhookRecord> {
+    return this.requestJson<WebhookRecord>(
+      `/webhooks/${encodeURIComponent(id)}/events/${encodeURIComponent(event)}`,
+      { method: enabled ? "PUT" : "DELETE" }
+    );
+  }
+
+  async eventCatalog(): Promise<Array<{ event: string; key: string }>> {
+    return this.requestJson<Array<{ event: string; key: string }>>("/events/catalog");
+  }
+
   async removeWebhook(id: string): Promise<void> {
     const response = await this.safeFetch(`${this.baseUrl}/webhooks/${encodeURIComponent(id)}`, {
       method: "DELETE",

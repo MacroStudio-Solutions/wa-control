@@ -27,15 +27,25 @@ Uso:
   wa send <sessionId> <numero> <mensagem>
   wa listen <sessionId> [--raw]
   wa listen --all [--raw]
-  wa webhook add <sessionId> <url> [--timeout-ms 5000] [--max-attempts 3]
-  wa webhook list <sessionId>
+  wa events [--json]
+  wa webhook add <sessionId> <url> [--events a,b] [--timeout-ms 5000] [--max-attempts 3]
+  wa webhook list [sessionId] [--json]
+  wa webhook set-events <id> <a,b|all>
+  wa webhook enable-event <id> <evento>
+  wa webhook disable-event <id> <evento>
+  wa webhook enable <id>
+  wa webhook disable <id>
   wa webhook remove <id>
-  wa webhook deliveries [sessionId]
+  wa webhook deliveries [sessionId] [--json]
 
 Notas:
   connect exibe QR quando necessario e restaura sessoes persistidas.
   qr le o QR corrente sem abrir conexao: ascii no terminal, PNG em base64 com
   --base64 e o data URL pronto para exibir com --json.
+  webhook sem selecao de eventos recebe todos, inclusive os que forem criados
+  depois; use --events ou set-events para restringir, e 'all' para voltar.
+  webhook list sem sessao lista todos, que e como um webhook orfao — de uma
+  sessao ja removida — aparece.
 `.trim();
 }
 
@@ -132,9 +142,14 @@ export function renderWebhooks(webhooks: WebhookRecord[]): string {
   return webhooks
     .map((webhook) => {
       const status = webhook.lastStatus ?? "never";
-      return `${webhook.id}\t${webhook.sessionId}\t${webhook.url}\t${status}`;
+      const state = webhook.enabled ? status : "disabled";
+      return `${webhook.id}\t${webhook.sessionId}\t${webhook.url}\t${state}\t${webhook.eventsLabel}`;
     })
     .join("\n");
+}
+
+export function renderEventCatalog(catalog: Array<{ event: string; key: string }>): string {
+  return catalog.map((entry) => `${entry.event}\t${entry.key}`).join("\n");
 }
 
 export function renderWebhookDeliveries(deliveries: WebhookDeliveryRecord[]): string {

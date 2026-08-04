@@ -105,4 +105,98 @@ describe("parseCliCommand", () => {
       id: "abc"
     });
   });
+
+  it("parses the event selection on webhook add", () => {
+    expect(
+      parseCliCommand([
+        "webhook",
+        "add",
+        "pessoal",
+        "https://example.com/hook",
+        "--events",
+        "message.received,session.connected"
+      ])
+    ).toEqual({
+      kind: "webhook.add",
+      sessionId: "pessoal",
+      url: "https://example.com/hook",
+      events: ["message.received", "session.connected"]
+    });
+  });
+
+  it("treats `all` as the empty selection, which subscribes to everything", () => {
+    expect(
+      parseCliCommand(["webhook", "add", "pessoal", "https://example.com/hook", "--events", "all"])
+    ).toEqual({
+      kind: "webhook.add",
+      sessionId: "pessoal",
+      url: "https://example.com/hook",
+      events: []
+    });
+  });
+
+  it("rejects an unknown event instead of silently dropping it", () => {
+    expect(() =>
+      parseCliCommand([
+        "webhook",
+        "add",
+        "pessoal",
+        "https://example.com/hook",
+        "--events",
+        "message.recieved"
+      ])
+    ).toThrow(/Evento desconhecido/);
+  });
+
+  it("keeps the session optional on webhook list, so orphans are reachable", () => {
+    expect(parseCliCommand(["webhook", "list", "--json"])).toEqual({
+      kind: "webhook.list",
+      json: true
+    });
+
+    expect(parseCliCommand(["webhook", "list", "pessoal", "--json"])).toEqual({
+      kind: "webhook.list",
+      sessionId: "pessoal",
+      json: true
+    });
+  });
+
+  it("parses the per-event toggles", () => {
+    expect(parseCliCommand(["webhook", "enable-event", "abc", "message.sent"])).toEqual({
+      kind: "webhook.toggle-event",
+      id: "abc",
+      event: "message.sent",
+      enabled: true
+    });
+
+    expect(parseCliCommand(["webhook", "disable-event", "abc", "connection.update"])).toEqual({
+      kind: "webhook.toggle-event",
+      id: "abc",
+      event: "connection.update",
+      enabled: false
+    });
+  });
+
+  it("does not confuse `disable-event` with `disable`", () => {
+    expect(parseCliCommand(["webhook", "disable", "abc"])).toEqual({
+      kind: "webhook.set-enabled",
+      id: "abc",
+      enabled: false
+    });
+  });
+
+  it("parses set-events", () => {
+    expect(parseCliCommand(["webhook", "set-events", "abc", "message.received"])).toEqual({
+      kind: "webhook.set-events",
+      id: "abc",
+      events: ["message.received"]
+    });
+  });
+
+  it("parses the event catalog command", () => {
+    expect(parseCliCommand(["events", "--json"])).toEqual({
+      kind: "events",
+      json: true
+    });
+  });
 });

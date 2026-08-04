@@ -116,7 +116,8 @@ export function openDatabase(path: string): AppDatabase {
       timeout_ms INTEGER NOT NULL DEFAULT 5000,
       max_attempts INTEGER NOT NULL DEFAULT 3,
       last_status TEXT,
-      last_error TEXT
+      last_error TEXT,
+      events TEXT
     );
 
     CREATE TABLE IF NOT EXISTS webhook_deliveries (
@@ -153,6 +154,9 @@ export function openDatabase(path: string): AppDatabase {
   ensureColumn(db, "webhooks", "is_enabled", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "webhooks", "timeout_ms", "INTEGER NOT NULL DEFAULT 5000");
   ensureColumn(db, "webhooks", "max_attempts", "INTEGER NOT NULL DEFAULT 3");
+  // NULL preserva o comportamento de quem foi cadastrado antes do filtro existir:
+  // sem selecao, o webhook continua recebendo todos os eventos.
+  ensureColumn(db, "webhooks", "events", "TEXT");
 
   return db;
 }

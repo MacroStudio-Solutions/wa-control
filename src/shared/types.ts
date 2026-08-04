@@ -122,6 +122,12 @@ export interface WebhookRecord {
   maxAttempts: number;
   lastStatus: string | null;
   lastError: string | null;
+  /** Eventos assinados. Vazio significa todos. */
+  events: string[];
+  /** Rotulo curto da assinatura, pronto para exibicao. */
+  eventsLabel: string;
+  /** Assinatura por evento, endereçavel por chave sem ponto. */
+  eventFlags: Record<string, boolean>;
 }
 
 export interface CreateWebhookRequest {
@@ -129,6 +135,12 @@ export interface CreateWebhookRequest {
   url: string;
   timeoutMs?: number;
   maxAttempts?: number;
+  events?: string[];
+}
+
+export interface UpdateWebhookRequest {
+  events?: string[];
+  enabled?: boolean;
 }
 
 export interface WebhookDeliveryRecord {

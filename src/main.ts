@@ -6,6 +6,7 @@ import { parseCliCommand } from "./cli/router.ts";
 import {
   renderChats,
   renderContacts,
+  renderEventCatalog,
   renderHelp,
   renderMessages,
   renderOfflineStatus,
@@ -166,15 +167,52 @@ async function run(): Promise<void> {
         sessionId: command.sessionId,
         url: command.url,
         ...(command.timeoutMs !== undefined ? { timeoutMs: command.timeoutMs } : {}),
-        ...(command.maxAttempts !== undefined ? { maxAttempts: command.maxAttempts } : {})
+        ...(command.maxAttempts !== undefined ? { maxAttempts: command.maxAttempts } : {}),
+        ...(command.events !== undefined ? { events: command.events } : {})
       });
-      console.log(`Webhook '${webhook.id}' cadastrado para a sessao '${webhook.sessionId}'.`);
+      console.log(
+        `Webhook '${webhook.id}' cadastrado para a sessao '${webhook.sessionId}' (${webhook.eventsLabel}).`
+      );
       return;
     }
 
     case "webhook.list": {
       const webhooks = await client.listWebhooks(command.sessionId);
-      console.log(renderWebhooks(webhooks));
+      console.log(
+        command.json ? JSON.stringify(webhooks, null, 2) : renderWebhooks(webhooks)
+      );
+      return;
+    }
+
+    case "webhook.set-events": {
+      const webhook = await client.setWebhookEvents(command.id, command.events);
+      console.log(`Webhook '${webhook.id}' agora assina: ${webhook.eventsLabel}.`);
+      return;
+    }
+
+    case "webhook.toggle-event": {
+      const webhook = await client.toggleWebhookEvent(
+        command.id,
+        command.event,
+        command.enabled
+      );
+      console.log(`Webhook '${webhook.id}' agora assina: ${webhook.eventsLabel}.`);
+      return;
+    }
+
+    case "webhook.set-enabled": {
+      const webhook = await client.setWebhookEnabled(command.id, command.enabled);
+      console.log(
+        `Webhook '${webhook.id}' ${webhook.enabled ? "habilitado" : "desabilitado"}.`
+      );
+      return;
+    }
+
+    case "events": {
+      const catalog = await client.eventCatalog();
+      console.log(
+        command.json ? JSON.stringify(catalog, null, 2) : renderEventCatalog(catalog)
+      );
       return;
     }
 

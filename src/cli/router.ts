@@ -1,4 +1,5 @@
 import { AppError } from "../shared/errors.ts";
+import { parseEventList } from "../shared/events.ts";
 
 export type CliCommand =
   | { kind: "help" }
@@ -14,10 +15,21 @@ export type CliCommand =
   | { kind: "session.remove"; sessionId: string; yes: boolean }
   | { kind: "send"; sessionId: string; to: string; text: string }
   | { kind: "listen"; sessionId: string | null; all: boolean; raw: boolean }
-  | { kind: "webhook.add"; sessionId: string; url: string; timeoutMs?: number; maxAttempts?: number }
-  | { kind: "webhook.list"; sessionId: string }
+  | {
+      kind: "webhook.add";
+      sessionId: string;
+      url: string;
+      timeoutMs?: number;
+      maxAttempts?: number;
+      events?: string[];
+    }
+  | { kind: "webhook.list"; sessionId?: string; json: boolean }
   | { kind: "webhook.remove"; id: string; sessionId?: string }
-  | { kind: "webhook.deliveries"; sessionId?: string; json: boolean };
+  | { kind: "webhook.set-events"; id: string; events: string[] }
+  | { kind: "webhook.toggle-event"; id: string; event: string; enabled: boolean }
+  | { kind: "webhook.set-enabled"; id: string; enabled: boolean }
+  | { kind: "webhook.deliveries"; sessionId?: string; json: boolean }
+  | { kind: "events"; json: boolean };
 
 function extractNumberFlag(args: string[], flag: string): number | undefined {
   const index = args.indexOf(flag);
@@ -27,6 +39,20 @@ function extractNumberFlag(args: string[], flag: string): number | undefined {
 
   const value = Number(args[index + 1]);
   if (!Number.isFinite(value)) {
+    throw new AppError("INVALID_FLAG", 400, `Valor invalido para ${flag}.`);
+  }
+
+  return value;
+}
+
+function extractStringFlag(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  if (index === -1) {
+    return undefined;
+  }
+
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
     throw new AppError("INVALID_FLAG", 400, `Valor invalido para ${flag}.`);
   }
 
@@ -54,9 +80,11 @@ export function parseCliCommand(argv: string[]): CliCommand {
       arg !== "--limit" &&
       arg !== "--timeout-ms" &&
       arg !== "--max-attempts" &&
+      arg !== "--events" &&
       source[index - 1] !== "--limit" &&
       source[index - 1] !== "--timeout-ms" &&
-      source[index - 1] !== "--max-attempts"
+      source[index - 1] !== "--max-attempts" &&
+      source[index - 1] !== "--events"
   );
 
   if (filtered[0] === "daemon" && filtered[1] === "start") {
@@ -69,6 +97,10 @@ export function parseCliCommand(argv: string[]): CliCommand {
 
   if (filtered[0] === "sessions") {
     return { kind: "sessions", json };
+  }
+
+  if (filtered[0] === "events") {
+    return { kind: "events", json };
   }
 
   if (filtered[0] === "chats" && filtered[1]) {
@@ -156,20 +188,59 @@ export function parseCliCommand(argv: string[]): CliCommand {
   if (filtered[0] === "webhook" && filtered[1] === "add" && filtered[2] && filtered[3]) {
     const timeoutMs = extractNumberFlag(argv, "--timeout-ms");
     const maxAttempts = extractNumberFlag(argv, "--max-attempts");
+    const events = extractStringFlag(argv, "--events");
 
     return {
       kind: "webhook.add",
       sessionId: filtered[2],
       url: filtered[3],
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-      ...(maxAttempts !== undefined ? { maxAttempts } : {})
+      ...(maxAttempts !== undefined ? { maxAttempts } : {}),
+      ...(events !== undefined ? { events: parseEventList(events) } : {})
     };
   }
 
-  if (filtered[0] === "webhook" && filtered[1] === "list" && filtered[2]) {
+  if (filtered[0] === "webhook" && filtered[1] === "list") {
+    const sessionId = filtered[2];
+
     return {
       kind: "webhook.list",
-      sessionId: filtered[2]
+      json,
+      ...(sessionId ? { sessionId } : {})
+    };
+  }
+
+  if (filtered[0] === "webhook" && filtered[1] === "set-events" && filtered[2] && filtered[3]) {
+    return {
+      kind: "webhook.set-events",
+      id: filtered[2],
+      events: parseEventList(filtered.slice(3).join(","))
+    };
+  }
+
+  if (
+    filtered[0] === "webhook" &&
+    (filtered[1] === "enable-event" || filtered[1] === "disable-event") &&
+    filtered[2] &&
+    filtered[3]
+  ) {
+    return {
+      kind: "webhook.toggle-event",
+      id: filtered[2],
+      event: filtered[3],
+      enabled: filtered[1] === "enable-event"
+    };
+  }
+
+  if (
+    filtered[0] === "webhook" &&
+    (filtered[1] === "enable" || filtered[1] === "disable") &&
+    filtered[2]
+  ) {
+    return {
+      kind: "webhook.set-enabled",
+      id: filtered[2],
+      enabled: filtered[1] === "enable"
     };
   }
 

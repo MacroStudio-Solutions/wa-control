@@ -7,8 +7,10 @@ import type {
   CreateWebhookRequest,
   MessageRecord,
   SendMessageRequest,
-  SessionCommandResponse
+  SessionCommandResponse,
+  UpdateWebhookRequest
 } from "../shared/types.ts";
+import { WEBHOOK_EVENTS, WEBHOOK_EVENT_KEYS } from "../shared/events.ts";
 import { DaemonRuntime } from "./daemonRuntime.ts";
 import { EventBus } from "./eventBus.ts";
 
@@ -154,6 +156,15 @@ export function startLocalApiServer({
           return createStreamResponse(request, eventBus, sessionId, includeRaw, logger);
         }
 
+        if (request.method === "GET" && url.pathname === "/events/catalog") {
+          return json(
+            WEBHOOK_EVENTS.map((event) => ({
+              event,
+              key: WEBHOOK_EVENT_KEYS[event]
+            }))
+          );
+        }
+
         if (request.method === "GET" && url.pathname === "/webhooks") {
           const sessionId = url.searchParams.get("sessionId") ?? undefined;
           return json(runtime.listWebhooks(sessionId));
@@ -169,9 +180,58 @@ export function startLocalApiServer({
           return json(runtime.addWebhook(body), 201);
         }
 
-        if (parts[0] === "webhooks" && parts[1] && request.method === "DELETE") {
+        // `parts.length === 2` importa: sem isso um DELETE em
+        // /webhooks/<id>/events/<evento> cairia aqui e apagaria o webhook
+        // inteiro em vez de desligar um evento dele.
+        if (
+          parts[0] === "webhooks" &&
+          parts[1] &&
+          parts.length === 2 &&
+          request.method === "DELETE"
+        ) {
           runtime.removeWebhook(decodeURIComponent(parts[1]));
           return new Response(null, { status: 204 });
+        }
+
+        if (
+          parts[0] === "webhooks" &&
+          parts[1] &&
+          parts.length === 2 &&
+          request.method === "PATCH"
+        ) {
+          const webhookId = decodeURIComponent(parts[1]);
+          const body = await parseJsonBody<UpdateWebhookRequest>(request);
+
+          if (body.events !== undefined) {
+            return json(runtime.setWebhookEvents(webhookId, body.events));
+          }
+
+          if (body.enabled !== undefined) {
+            return json(runtime.setWebhookEnabled(webhookId, body.enabled));
+          }
+
+          throw new AppError(
+            "NOTHING_TO_UPDATE",
+            400,
+            "Informe `events` ou `enabled` no corpo da requisicao."
+          );
+        }
+
+        if (
+          parts[0] === "webhooks" &&
+          parts[1] &&
+          parts[2] === "events" &&
+          parts[3] &&
+          (request.method === "PUT" || request.method === "DELETE")
+        ) {
+          const webhookId = decodeURIComponent(parts[1]);
+          const eventName = decodeURIComponent(parts[3]);
+
+          return json(
+            request.method === "PUT"
+              ? runtime.enableWebhookEvent(webhookId, eventName)
+              : runtime.disableWebhookEvent(webhookId, eventName)
+          );
         }
 
         if (parts[0] === "sessions" && parts[1]) {

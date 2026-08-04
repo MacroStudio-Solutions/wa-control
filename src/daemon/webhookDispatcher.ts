@@ -1,4 +1,5 @@
 import type { Logger } from "../shared/logger.ts";
+import { webhookAcceptsEvent } from "../shared/events.ts";
 import { stringifyEvent, stripRawFromEvent } from "../shared/eventSerde.ts";
 import type { NormalizedEvent, WebhookRecord } from "../shared/types.ts";
 import { WebhookDeliveriesRepo } from "../storage/webhookDeliveriesRepo.ts";
@@ -53,6 +54,10 @@ export class WebhookDispatcher {
     const webhooks = this.webhooksRepo.list(event.sessionId);
     for (const webhook of webhooks) {
       if (!webhook.enabled) {
+        continue;
+      }
+
+      if (!webhookAcceptsEvent(webhook.events, event.event)) {
         continue;
       }
 

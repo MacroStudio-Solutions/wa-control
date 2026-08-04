@@ -44,7 +44,7 @@ export class DaemonRuntime {
       startedAt: new Date().toISOString(),
       host: config.host,
       port: config.port,
-      version: "0.3.0"
+      version: "0.4.0"
     };
 
     this.publisher = new EventPublisher(eventsRepo, eventBus, logger);
@@ -108,8 +108,25 @@ export class DaemonRuntime {
       sessionId: input.sessionId,
       url: input.url,
       timeoutMs: input.timeoutMs ?? 5000,
-      maxAttempts: input.maxAttempts ?? 3
+      maxAttempts: input.maxAttempts ?? 3,
+      ...(input.events ? { events: input.events } : {})
     });
+  }
+
+  setWebhookEvents(id: string, events: readonly string[]): WebhookRecord {
+    return this.webhooks.setEvents(id, events);
+  }
+
+  enableWebhookEvent(id: string, event: string): WebhookRecord {
+    return this.webhooks.enableEvent(id, event);
+  }
+
+  disableWebhookEvent(id: string, event: string): WebhookRecord {
+    return this.webhooks.disableEvent(id, event);
+  }
+
+  setWebhookEnabled(id: string, enabled: boolean): WebhookRecord {
+    return this.webhooks.setEnabled(id, enabled);
   }
 
   removeWebhook(id: string): void {
