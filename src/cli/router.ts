@@ -8,7 +8,8 @@ export type CliCommand =
   | { kind: "chats"; sessionId: string; limit: number; json: boolean }
   | { kind: "contacts"; sessionId: string; limit: number; json: boolean }
   | { kind: "messages"; sessionId: string; chat: string; limit: number; json: boolean }
-  | { kind: "connect"; sessionId: string }
+  | { kind: "connect"; sessionId: string; json: boolean }
+  | { kind: "qr"; sessionId: string; json: boolean; base64: boolean }
   | { kind: "disconnect"; sessionId: string }
   | { kind: "session.remove"; sessionId: string; yes: boolean }
   | { kind: "send"; sessionId: string; to: string; text: string }
@@ -49,6 +50,7 @@ export function parseCliCommand(argv: string[]): CliCommand {
       arg !== "--json" &&
       arg !== "--raw" &&
       arg !== "--yes" &&
+      arg !== "--base64" &&
       arg !== "--limit" &&
       arg !== "--timeout-ms" &&
       arg !== "--max-attempts" &&
@@ -98,7 +100,16 @@ export function parseCliCommand(argv: string[]): CliCommand {
   }
 
   if (filtered[0] === "connect" && filtered[1]) {
-    return { kind: "connect", sessionId: filtered[1] };
+    return { kind: "connect", sessionId: filtered[1], json };
+  }
+
+  if (filtered[0] === "qr" && filtered[1]) {
+    return {
+      kind: "qr",
+      sessionId: filtered[1],
+      json,
+      base64: argv.includes("--base64")
+    };
   }
 
   if (filtered[0] === "disconnect" && filtered[1]) {

@@ -8,6 +8,30 @@ describe("parseCliCommand", () => {
     });
   });
 
+  it("parses qr with output flags", () => {
+    expect(parseCliCommand(["qr", "pessoal", "--base64"])).toEqual({
+      kind: "qr",
+      sessionId: "pessoal",
+      json: false,
+      base64: true
+    });
+
+    expect(parseCliCommand(["qr", "pessoal", "--json"])).toEqual({
+      kind: "qr",
+      sessionId: "pessoal",
+      json: true,
+      base64: false
+    });
+  });
+
+  it("parses connect with json", () => {
+    expect(parseCliCommand(["connect", "pessoal", "--json"])).toEqual({
+      kind: "connect",
+      sessionId: "pessoal",
+      json: true
+    });
+  });
+
   it("parses listen --all", () => {
     expect(parseCliCommand(["listen", "--all"])).toEqual({
       kind: "listen",

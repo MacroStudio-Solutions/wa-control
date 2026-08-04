@@ -5,8 +5,10 @@ import type { Logger } from "../shared/logger.ts";
 import type {
   AppConfig,
   SendMessageResponse,
+  SessionQrResponse,
   SessionRecord
 } from "../shared/types.ts";
+import { dataUrlToBase64, renderQrDataUrl, renderQrTerminal } from "../baileys/qr.ts";
 import { nowIso } from "../shared/utils.ts";
 import { ReadModelStore } from "../read-model/store.ts";
 import { SessionsRepo } from "../storage/sessionsRepo.ts";
@@ -63,6 +65,36 @@ export class SessionManager {
   async disconnect(sessionId: string): Promise<SessionRecord> {
     const controller = this.getExistingController(sessionId);
     return controller.disconnect();
+  }
+
+  /**
+   * Leitura pura do QR corrente. Nao abre socket nem muda estado, entao pode ser
+   * consultada em intervalo curto enquanto alguem espera para escanear.
+   */
+  async readQr(sessionId: string): Promise<SessionQrResponse> {
+    const session = this.requireSession(sessionId);
+
+    if (!session.qr) {
+      throw new AppError(
+        "QR_NOT_AVAILABLE",
+        409,
+        `Sessao '${session.id}' nao tem QR disponivel agora (status '${session.status}'). Use \`wa connect ${session.id}\` para solicitar um.`
+      );
+    }
+
+    const [ascii, dataUrl] = await Promise.all([
+      renderQrTerminal(session.qr),
+      renderQrDataUrl(session.qr)
+    ]);
+
+    return {
+      sessionId: session.id,
+      status: session.status,
+      qr: session.qr,
+      ascii,
+      base64: dataUrlToBase64(dataUrl),
+      dataUrl
+    };
   }
 
   async remove(sessionId: string): Promise<void> {

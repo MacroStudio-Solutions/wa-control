@@ -1,6 +1,6 @@
 {
   "name": "wa-control",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.9",
@@ -19,13 +19,15 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
     "bun-types": "^1.3.9",
     "typescript": "^5.9.2"
   }

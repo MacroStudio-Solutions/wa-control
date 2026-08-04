@@ -98,6 +98,19 @@ export interface SessionCommandResponse {
   qrTerminal?: string;
 }
 
+export interface SessionQrResponse {
+  sessionId: string;
+  status: SessionStatus;
+  /** Payload cru do QR, o mesmo que o WhatsApp emite. */
+  qr: string;
+  /** Desenho em blocos, para terminal. */
+  ascii: string;
+  /** PNG em base64, sem o prefixo de data URL. */
+  base64: string;
+  /** PNG pronto para o atributo src de uma imagem. */
+  dataUrl: string;
+}
+
 export interface WebhookRecord {
   id: string;
   sessionId: string;

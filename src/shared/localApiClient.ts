@@ -11,6 +11,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   SessionCommandResponse,
+  SessionQrResponse,
   SessionRecord,
   StatusResponse,
   WebhookDeliveryRecord,
@@ -37,7 +38,14 @@ export class LocalApiClient {
   private readonly config = loadAppConfig();
   private readonly token = readLocalToken(this.config);
   private readonly baseUrl = `http://${this.config.host}:${this.config.port}`;
+  /**
+   * Leituras respondem na hora, entao um limite curto e o que separa "daemon
+   * fora do ar" de "daemon lento". `connect` e a excecao: ele segura a resposta
+   * ate o WhatsApp emitir o QR, e com o limite curto toda tentativa de parear
+   * morria aqui e aparecia como daemon parado.
+   */
   private readonly requestTimeoutMs = 1500;
+  private readonly connectTimeoutMs = 25_000;
 
   private buildHeaders(includeJson = false): HeadersInit {
     if (!this.token) {
@@ -54,7 +62,11 @@ export class LocalApiClient {
     };
   }
 
-  private async safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  private async safeFetch(
+    url: string,
+    init?: RequestInit,
+    timeoutMs = this.requestTimeoutMs
+  ): Promise<Response> {
     const controller = new AbortController();
     const timeoutError = new AppError(
       "DAEMON_UNAVAILABLE",
@@ -70,7 +82,7 @@ export class LocalApiClient {
       const timeout = setTimeout(() => {
         controller.abort();
         reject(timeoutError);
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
 
       timeout.unref?.();
     });
@@ -141,9 +153,16 @@ export class LocalApiClient {
   }
 
   async connect(sessionId: string): Promise<SessionCommandResponse> {
-    return this.requestJson<SessionCommandResponse>(`/sessions/${encodeURIComponent(sessionId)}/connect`, {
-      method: "POST"
-    });
+    return this.requestJson<SessionCommandResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/connect`,
+      { method: "POST" },
+      false,
+      this.connectTimeoutMs
+    );
+  }
+
+  async qr(sessionId: string): Promise<SessionQrResponse> {
+    return this.requestJson<SessionQrResponse>(`/sessions/${encodeURIComponent(sessionId)}/qr`);
   }
 
   async disconnect(sessionId: string): Promise<SessionCommandResponse> {
@@ -232,12 +251,17 @@ export class LocalApiClient {
   private async requestJson<T>(
     path: string,
     init: RequestInit = {},
-    includeJson = false
+    includeJson = false,
+    timeoutMs = this.requestTimeoutMs
   ): Promise<T> {
-    const response = await this.safeFetch(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: this.buildHeaders(includeJson)
-    });
+    const response = await this.safeFetch(
+      `${this.baseUrl}${path}`,
+      {
+        ...init,
+        headers: this.buildHeaders(includeJson)
+      },
+      timeoutMs
+    );
 
     if (!response.ok) {
       await parseError(response);

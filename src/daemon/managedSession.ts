@@ -13,6 +13,7 @@ import pino from "pino";
 import { normalizeIncomingMessage } from "../baileys/normalizeMessage.ts";
 import { ReadModelStore } from "../read-model/store.ts";
 import { renderQrTerminal } from "../baileys/qr.ts";
+import { resolveWaWebVersion } from "../baileys/waVersion.ts";
 import { AppError } from "../shared/errors.ts";
 import type { Logger } from "../shared/logger.ts";
 import type {
@@ -274,7 +275,11 @@ export class ManagedSession {
     });
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    // Sem versao explicita o Baileys anuncia a que foi congelada no release, e
+    // o WhatsApp responde 405 assim que ela envelhece — sem QR, sem pareamento.
+    const version = await resolveWaWebVersion(this.config, this.logger);
     const sock = makeWASocket({
+      ...(version ? { version } : {}),
       auth: state,
       browser: Browsers.ubuntu("wa-control"),
       logger: pino({ level: "silent" }),

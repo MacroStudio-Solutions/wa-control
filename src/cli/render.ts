@@ -20,7 +20,8 @@ Uso:
   wa chats <sessionId> [--limit 50] [--json]
   wa contacts <sessionId> [--limit 100] [--json]
   wa messages <sessionId> <chat|jid|numero> [--limit 50] [--json]
-  wa connect <sessionId>
+  wa connect <sessionId> [--json]
+  wa qr <sessionId> [--json] [--base64]
   wa disconnect <sessionId>
   wa session remove <sessionId> --yes
   wa send <sessionId> <numero> <mensagem>
@@ -33,6 +34,8 @@ Uso:
 
 Notas:
   connect exibe QR quando necessario e restaura sessoes persistidas.
+  qr le o QR corrente sem abrir conexao: ascii no terminal, PNG em base64 com
+  --base64 e o data URL pronto para exibir com --json.
 `.trim();
 }
 

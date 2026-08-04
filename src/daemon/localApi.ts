@@ -181,6 +181,10 @@ export function startLocalApiServer({
             return json(asSessionResponse(await runtime.sessions.connect(sessionId)));
           }
 
+          if (request.method === "GET" && parts[2] === "qr") {
+            return json(await runtime.sessions.readQr(sessionId));
+          }
+
           if (request.method === "GET" && parts[2] === "chats") {
             return json(runtime.listChats(sessionId, parseLimit(url, 50)) satisfies ChatRecord[]);
           }

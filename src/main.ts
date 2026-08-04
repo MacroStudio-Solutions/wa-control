@@ -97,10 +97,32 @@ async function run(): Promise<void> {
 
     case "connect": {
       const result = await client.connect(command.sessionId);
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
       if (result.qrTerminal) {
         console.log(result.qrTerminal);
       }
       console.log(`Sessao '${result.session.id}' preparada. ${result.note ?? ""}`.trim());
+      return;
+    }
+
+    case "qr": {
+      const result = await client.qr(command.sessionId);
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      if (command.base64) {
+        console.log(result.base64);
+        return;
+      }
+
+      console.log(result.ascii);
+      console.log(`Sessao '${result.sessionId}' aguardando leitura do QR.`);
       return;
     }
 
