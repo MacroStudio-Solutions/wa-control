@@ -39,6 +39,49 @@ wa webhook remove <id>
 wa webhook deliveries pessoal
 ```
 
+## Evento de mensagem recebida
+
+O webhook recebe o evento ja normalizado, nao o formato cru do Baileys:
+
+```json
+{
+  "id": "9f1c...",
+  "event": "message.received",
+  "sessionId": "pessoal",
+  "timestamp": 1785849522,
+  "messageId": "3EB0...",
+  "chatId": "88356755087579@lid",
+  "chatType": "direct",
+  "chatLid": "88356755087579@lid",
+  "chatPhoneNumber": "556784020665",
+  "from": "556784020665@s.whatsapp.net",
+  "fromLid": "88356755087579@lid",
+  "fromPhoneNumber": "556784020665",
+  "senderResolved": true,
+  "pushName": "Priscila",
+  "fromMe": false,
+  "type": "text",
+  "text": "Bom dia"
+}
+```
+
+Desde o rollout de LID do WhatsApp, `chatId` costuma vir como identificador
+opaco (`@lid`) em vez do numero. Para filtrar por contato use
+`fromPhoneNumber` (so digitos) ou `from`, nunca `chatId`.
+
+`senderResolved` diz se o numero foi realmente descoberto. Quando ele e `false`,
+`fromPhoneNumber` e `chatPhoneNumber` vem nulos e `from` cai no identificador
+opaco — que continua estavel dentro da sessao, mas nao e o numero que o operador
+conhece. Isso acontece quando o WhatsApp nao revela o numero no envelope e o
+par LID<->numero ainda nao foi aprendido; nao existe consulta ao servidor que
+traduza um LID de volta para numero depois do fato.
+
+O pareamento e aprendido do envelope da mensagem e da lista de contatos, e fica
+gravado na pasta de auth da sessao, entao sobrevive a reinicios do daemon.
+
+Em grupos, `chatId` e o grupo e `from` e o participante; `chatPhoneNumber` e
+`chatLid` vem nulos.
+
 ## Desenvolvimento
 
 ```bash

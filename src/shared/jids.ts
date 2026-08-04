@@ -35,11 +35,29 @@ export function normalizeJidQuery(value: string): string {
   }
 
   if (normalized.includes("@")) {
-    return normalized;
+    return stripDevice(normalized);
   }
 
   const digits = normalizeDigits(normalized);
   return digits ? `${digits}${PHONE_JID_SUFFIX}` : normalized;
+}
+
+/**
+ * O WhatsApp anexa o dispositivo ao usuario do JID (`5511999:12@s.whatsapp.net`).
+ * Para identidade de contato o dispositivo e ruido: ele quebra a leitura do
+ * mapeamento LID<->numero e vaza para dentro do numero projetado.
+ */
+function stripDevice(jid: string): string {
+  const separator = jid.indexOf("@");
+  if (separator < 0) {
+    return jid;
+  }
+
+  const user = jid.slice(0, separator);
+  const domain = jid.slice(separator);
+  const device = user.indexOf(":");
+
+  return device < 0 ? jid : `${user.slice(0, device)}${domain}`;
 }
 
 export function isPhoneJid(jid: string): boolean {
@@ -204,6 +222,37 @@ export function projectAddress(
     lookupKey,
     phoneNumber,
     aliases
+  };
+}
+
+/**
+ * Identidade de um interlocutor, do jeito que um consumidor externo precisa dela:
+ * o numero quando ele e conhecido, o identificador opaco sempre, e um sinal
+ * explicito de resolucao — nunca um campo vazio.
+ */
+export interface ResolvedIdentity {
+  jid: string | null;
+  phoneJid: string | null;
+  phoneNumber: string | null;
+  lid: string | null;
+  resolved: boolean;
+}
+
+export function resolveIdentity(
+  authDir: string,
+  preferred: string | null | undefined,
+  alternate?: string | null
+): ResolvedIdentity {
+  const address = projectAddress(authDir, preferred, alternate ? [alternate] : []);
+  const phoneJid = address.lookupJid && isPhoneJid(address.lookupJid) ? address.lookupJid : null;
+  const lid = address.aliases.find((alias) => isLidJid(alias)) ?? null;
+
+  return {
+    jid: phoneJid ?? lid ?? address.jid,
+    phoneJid,
+    phoneNumber: address.phoneNumber,
+    lid,
+    resolved: Boolean(address.phoneNumber)
   };
 }
 

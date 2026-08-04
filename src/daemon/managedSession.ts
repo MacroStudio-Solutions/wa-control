@@ -10,6 +10,11 @@ import makeWASocket, {
   type WASocket
 } from "@whiskeysockets/baileys";
 import pino from "pino";
+import {
+  extractContactLidPairs,
+  extractMessageLidPairs,
+  rememberLidPairs
+} from "../baileys/lidDirectory.ts";
 import { normalizeIncomingMessage } from "../baileys/normalizeMessage.ts";
 import { ReadModelStore } from "../read-model/store.ts";
 import { renderQrTerminal } from "../baileys/qr.ts";
@@ -300,17 +305,43 @@ export class ManagedSession {
     });
 
     sock.ev.on("messages.upsert", (upsert) => {
-      void this.handleMessagesUpsert(upsert);
+      void this.handleMessagesUpsert(sock, upsert);
+    });
+
+    sock.ev.on("contacts.upsert", (contacts = []) => {
+      void this.rememberContacts(sock, contacts as unknown as Array<Record<string, unknown>>);
+    });
+
+    sock.ev.on("contacts.update", (contacts = []) => {
+      void this.rememberContacts(sock, contacts as unknown as Array<Record<string, unknown>>);
     });
   }
 
-  private async handleMessagesUpsert(upsert: BaileysEventMap["messages.upsert"]): Promise<void> {
+  private async rememberContacts(
+    sock: WASocket,
+    contacts: Array<Record<string, unknown>>
+  ): Promise<void> {
+    for (const contact of contacts) {
+      await rememberLidPairs(sock, extractContactLidPairs(contact), this.logger);
+    }
+  }
+
+  private async handleMessagesUpsert(
+    sock: WASocket,
+    upsert: BaileysEventMap["messages.upsert"]
+  ): Promise<void> {
     if (upsert.type !== "notify") {
       return;
     }
 
+    const authDir = this.getAuthDir();
+
     for (const message of upsert.messages) {
-      const normalized = normalizeIncomingMessage(this.session.id, message, true);
+      // Guardar antes de normalizar: o numero so vem no envelope desta mensagem,
+      // e as proximas dela podem chegar sem ele.
+      await rememberLidPairs(sock, extractMessageLidPairs(message), this.logger);
+
+      const normalized = normalizeIncomingMessage(this.session.id, message, authDir, true);
       if (!normalized) {
         continue;
       }

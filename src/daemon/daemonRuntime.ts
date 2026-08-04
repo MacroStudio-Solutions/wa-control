@@ -44,7 +44,7 @@ export class DaemonRuntime {
       startedAt: new Date().toISOString(),
       host: config.host,
       port: config.port,
-      version: "0.2.0"
+      version: "0.3.0"
     };
 
     this.publisher = new EventPublisher(eventsRepo, eventBus, logger);
