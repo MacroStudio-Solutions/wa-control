@@ -13,6 +13,7 @@ import { SessionsRepo } from "../storage/sessionsRepo.ts";
 import { WebhookDeliveriesRepo } from "../storage/webhookDeliveriesRepo.ts";
 import { WebhooksRepo } from "../storage/webhooksRepo.ts";
 import { DaemonRuntime } from "./daemonRuntime.ts";
+import { enforceSingleInstance } from "./daemonGuard.ts";
 import { EventBus } from "./eventBus.ts";
 import { startLocalApiServer } from "./localApi.ts";
 
@@ -37,6 +38,8 @@ export async function startDaemon(): Promise<void> {
   const config = loadAppConfig();
   const logger = createLogger(config);
   const token = readOrCreateLocalToken(config);
+
+  enforceSingleInstance(config, logger);
 
   if (await healthcheck(`http://${config.host}:${config.port}`)) {
     throw new AppError(

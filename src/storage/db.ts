@@ -18,11 +18,16 @@ function ensureColumn(db: AppDatabase, table: string, column: string, definition
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
 }
 
+export const SQLITE_BUSY_TIMEOUT_MS = 5000;
+
 export function openDatabase(path: string): AppDatabase {
   const db = new Database(path, { create: true });
 
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
+  // Pragma por conexao (sem persistencia): daemon e CLI abrem o mesmo
+  // app.sqlite; sem isso, escrita cruzada vira SQLITE_BUSY imediato.
+  db.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (

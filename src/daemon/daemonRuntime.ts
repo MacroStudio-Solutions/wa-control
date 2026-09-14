@@ -230,7 +230,9 @@ export class DaemonRuntime {
           pid: this.runtimeInfo.pid,
           startedAt: this.runtimeInfo.startedAt,
           host: this.runtimeInfo.host,
-          port: this.runtimeInfo.port
+          port: this.runtimeInfo.port,
+          version: this.runtimeInfo.version,
+          executable: process.execPath
         },
         null,
         2
