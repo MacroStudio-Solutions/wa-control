@@ -68,4 +68,35 @@ export class EventsRepo {
       timestamp: row.created_at
     }));
   }
+
+  /**
+   * Eventos `message.received` ao vivo guardam o payload bruto do Baileys;
+   * midia de history-sync nao gera evento — para ela devolvemos null e o
+   * pipeline de download classifica MEDIA_PAYLOAD_UNAVAILABLE.
+   */
+  findMessageRawPayload(sessionId: string, messageId: string): NormalizedEvent | null {
+    const row = this.db
+      .query(`
+        SELECT *
+        FROM events
+        WHERE event_name = 'message.received'
+          AND session_id = ?1
+          AND json_extract(payload_json, '$.messageId') = ?2
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      `)
+      .get(sessionId, messageId) as EventRow | null;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      ...parseEventJson(row.payload_json),
+      id: row.id,
+      event: row.event_name,
+      sessionId: row.session_id,
+      timestamp: row.created_at
+    };
+  }
 }

@@ -4,6 +4,8 @@ import { AppError } from "../shared/errors.ts";
 import type { Logger } from "../shared/logger.ts";
 import type {
   AppConfig,
+  SendMediaRequest,
+  SendMediaResponse,
   SendMessageResponse,
   SessionQrResponse,
   SessionRecord
@@ -119,6 +121,15 @@ export class SessionManager {
   async sendTextMessage(sessionId: string, to: string, text: string): Promise<SendMessageResponse> {
     const controller = this.getExistingController(sessionId);
     return controller.sendTextMessage(to, text);
+  }
+
+  async sendMediaMessage(
+    sessionId: string,
+    media: SendMediaRequest,
+    buffer: Uint8Array
+  ): Promise<SendMediaResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.sendMediaMessage(media, buffer);
   }
 
   private getOrCreateController(sessionId: string): ManagedSession {

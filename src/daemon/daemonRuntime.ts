@@ -1,5 +1,8 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
+import type { WAMessage } from "@whiskeysockets/baileys";
+import pkg from "../../package.json" with { type: "json" };
 import { AppError } from "../shared/errors.ts";
+import { DEFAULT_TIMEOUTS } from "../shared/localApiClient.ts";
 import type { Logger } from "../shared/logger.ts";
 import type {
   AppConfig,
@@ -8,9 +11,18 @@ import type {
   CreateWebhookRequest,
   DaemonRuntimeInfo,
   MessageRecord,
+  SendMediaRequest,
+  SendMediaResponse,
   StatusResponse,
   WebhookRecord
 } from "../shared/types.ts";
+import {
+  createMediaFetcher,
+  downloadIncomingMedia,
+  type IncomingMediaDownload,
+  type MediaFetcher
+} from "../media/mediaDownload.ts";
+import { messageNotFoundError } from "../media/mediaTypes.ts";
 import { ReadModelStore } from "../read-model/store.ts";
 import { EventsRepo } from "../storage/eventsRepo.ts";
 import { SessionsRepo } from "../storage/sessionsRepo.ts";
@@ -37,14 +49,17 @@ export class DaemonRuntime {
     private readonly eventBus: EventBus,
     logger: Logger,
     sessionsRepo: SessionsRepo,
-    readModel: ReadModelStore
+    readModel: ReadModelStore,
+    private readonly mediaFetcher: MediaFetcher = createMediaFetcher(
+      DEFAULT_TIMEOUTS.mediaTimeoutMs
+    )
   ) {
     this.runtimeInfo = {
       pid: process.pid,
       startedAt: new Date().toISOString(),
       host: config.host,
       port: config.port,
-      version: "0.4.0"
+      version: pkg.version
     };
 
     this.publisher = new EventPublisher(eventsRepo, eventBus, logger);
@@ -153,6 +168,48 @@ export class DaemonRuntime {
   listMessages(sessionId: string, chat: string, limit = 50): MessageRecord[] {
     this.sessions.requireSession(sessionId);
     return this.readModel.listMessages(sessionId, chat, limit);
+  }
+
+  /**
+   * Envio de midia: delega a sessao gerenciada, que aplica a mesma disciplina
+   * do send-texto (checagem de conexao, resolucao de JID, evento e read model).
+   */
+  sendMedia(
+    sessionId: string,
+    media: SendMediaRequest,
+    buffer: Uint8Array
+  ): Promise<SendMediaResponse> {
+    return this.sessions.sendMediaMessage(sessionId, media, buffer);
+  }
+
+  /**
+   * Download de midia (read-only, nao transmite nada ao WhatsApp): resolve a
+   * mensagem no read model por chat+messageId, recupera o payload bruto
+   * guardado pelos eventos ao vivo e delega a classificacao e o fetch ao
+   * pipeline de midia.
+   */
+  async downloadMedia(
+    sessionId: string,
+    chat: string,
+    messageId: string
+  ): Promise<{ record: MessageRecord; download: IncomingMediaDownload }> {
+    this.sessions.requireSession(sessionId);
+
+    const record = this.readModel.findMessage(sessionId, chat, messageId);
+    if (!record) {
+      throw messageNotFoundError(chat, messageId);
+    }
+
+    const event = this.eventsRepo.findMessageRawPayload(sessionId, messageId);
+    const raw = (event?.raw ?? null) as unknown as WAMessage | null;
+
+    const download = await downloadIncomingMedia({
+      record,
+      raw,
+      fetchMedia: this.mediaFetcher
+    });
+
+    return { record, download };
   }
 
   assertDaemonCanStart(): void {

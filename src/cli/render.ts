@@ -25,6 +25,8 @@ Uso:
   wa disconnect <sessionId>
   wa session remove <sessionId> --yes
   wa send <sessionId> <numero> <mensagem>
+  wa send-media <sessionId> <numero|jid> <arquivo> [--type image|audio] [--caption texto] [--ptt] [--json]
+  wa download-media <sessionId> <chat|jid|numero> <messageId> [--out <caminho>] [--json]
   wa listen <sessionId> [--raw]
   wa listen --all [--raw]
   wa events [--json]
@@ -42,6 +44,21 @@ Notas:
   connect exibe QR quando necessario e restaura sessoes persistidas.
   qr le o QR corrente sem abrir conexao: ascii no terminal, PNG em base64 com
   --base64 e o data URL pronto para exibir com --json.
+  send-media envia imagem e audio: o tipo e inferido da extensao e --type
+  sobrepoe; caption so em imagem; --ptt envia audio como voice note (a voice
+  note ogg/opus carrega mimetype audio/ogg; codecs=opus). Upload tem timeout
+  proprio de 60s e herda a semantica de exit codes do send: 0 entregue; 1
+  falha sem transmissao (daemon parado ou erro classificado); 2 resultado
+  incerto — a midia PODE ter sido enviada; conferir \`wa messages <sessionId>
+  <numero>\` antes de reenviar para nao duplicar. Tipos fora da whitelist
+  (video/documento/sticker) respondem MEDIA_TYPE_NOT_SUPPORTED_YET.
+  download-media grava a midia de uma mensagem recebida (a mesma referencia
+  chat + messageId que messages e o webhook entregam). Com --out grava no
+  caminho dado; sem --out, no diretorio corrente como <messageId>.<extensao
+  pelo MIME>. Midia de history-sync nao tem payload bruto guardado e responde
+  MEDIA_PAYLOAD_UNAVAILABLE — peca o reenvio do arquivo; midia expirada
+  responde DOWNLOAD_FAILED, sem retry automatico. Download e read-only: nada
+  e transmitido ao WhatsApp; exit 0/1.
   webhook sem selecao de eventos recebe todos, inclusive os que forem criados
   depois; use --events ou set-events para restringir, e 'all' para voltar.
   webhook list sem sessao lista todos, que e como um webhook orfao — de uma
@@ -128,7 +145,11 @@ export function renderMessages(messages: MessageRecord[]): string {
   return messages
     .map((message) => {
       const direction = message.fromMe ? "me" : "in";
-      const text = message.text ?? `[${message.messageType}]`;
+      const fallback =
+        message.messageType === "unknown" && message.rawMessageType
+          ? `[unknown:${message.rawMessageType}]`
+          : `[${message.messageType}]`;
+      const text = message.text ?? fallback;
       return `${message.timestamp}\t${direction}\t${text}`;
     })
     .join("\n");

@@ -1,53 +1,8 @@
-import { extractMessageContent, getContentType } from "@whiskeysockets/baileys";
 import type { WAMessage } from "@whiskeysockets/baileys";
+import { extractMessageContentInfo } from "./messageContent.ts";
 import { classifyChatJid, isGroupJid, resolveIdentity } from "../shared/jids.ts";
 import type { NormalizedEvent } from "../shared/types.ts";
 import { nowUnix } from "../shared/utils.ts";
-
-function parseText(contentType: string | undefined, content: ReturnType<typeof extractMessageContent>): string | null {
-  if (!content || !contentType) {
-    return null;
-  }
-
-  switch (contentType) {
-    case "conversation":
-      return typeof content.conversation === "string" ? content.conversation : null;
-    case "extendedTextMessage":
-      return content.extendedTextMessage?.text ?? null;
-    case "imageMessage":
-      return content.imageMessage?.caption ?? null;
-    case "videoMessage":
-      return content.videoMessage?.caption ?? null;
-    case "documentMessage":
-      return content.documentMessage?.caption ?? null;
-    case "buttonsResponseMessage":
-      return content.buttonsResponseMessage?.selectedDisplayText ?? null;
-    case "listResponseMessage":
-      return content.listResponseMessage?.title ?? null;
-    default:
-      return null;
-  }
-}
-
-function mapMessageType(contentType: string | undefined): string {
-  switch (contentType) {
-    case "conversation":
-    case "extendedTextMessage":
-      return "text";
-    case "imageMessage":
-      return "image";
-    case "videoMessage":
-      return "video";
-    case "audioMessage":
-      return "audio";
-    case "documentMessage":
-      return "document";
-    case "stickerMessage":
-      return "sticker";
-    default:
-      return contentType ?? "unknown";
-  }
-}
 
 function toTimestamp(value: unknown): number {
   if (typeof value === "number") {
@@ -87,8 +42,7 @@ export function normalizeIncomingMessage(
     return null;
   }
 
-  const content = extractMessageContent(message.message);
-  const contentType = getContentType(content);
+  const contentInfo = extractMessageContentInfo(message.message);
 
   // Numa conversa direta o remetente e o proprio chat; num grupo e o participante.
   // O WhatsApp entrega o endereco alternativo (numero, quando o envelope veio por
@@ -121,8 +75,9 @@ export function normalizeIncomingMessage(
     senderResolved: sender.resolved,
     pushName: optionalString(message.pushName),
     fromMe: false,
-    type: mapMessageType(contentType),
-    text: parseText(contentType, content)
+    type: contentInfo.type,
+    text: contentInfo.text,
+    rawMessageType: contentInfo.rawMessageType
   };
 
   if (includeRaw) {

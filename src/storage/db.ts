@@ -150,6 +150,9 @@ export function openDatabase(path: string): AppDatabase {
   ensureColumn(db, "sessions", "last_connected_at", "TEXT");
   ensureColumn(db, "sessions", "reconnect_attempts", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "sessions", "qr", "TEXT");
+  // Coluna aditiva do vocabulario normalizado de tipos (forward_only):
+  // linhas antigas permanecem como estao, com NULL em raw_message_type.
+  ensureColumn(db, "messages", "raw_message_type", "TEXT");
   ensureColumn(db, "webhooks", "updated_at", "TEXT");
   ensureColumn(db, "webhooks", "is_enabled", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "webhooks", "timeout_ms", "INTEGER NOT NULL DEFAULT 5000");

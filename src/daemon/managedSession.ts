@@ -16,6 +16,8 @@ import {
   rememberLidPairs
 } from "../baileys/lidDirectory.ts";
 import { normalizeIncomingMessage } from "../baileys/normalizeMessage.ts";
+import { buildMediaMessageContent } from "../media/mediaContent.ts";
+import type { MediaDescriptor } from "../media/mediaTypes.ts";
 import { ReadModelStore } from "../read-model/store.ts";
 import { renderQrTerminal } from "../baileys/qr.ts";
 import { resolveWaWebVersion } from "../baileys/waVersion.ts";
@@ -23,6 +25,8 @@ import { AppError } from "../shared/errors.ts";
 import type { Logger } from "../shared/logger.ts";
 import type {
   AppConfig,
+  SendMediaRequest,
+  SendMediaResponse,
   SendMessageResponse,
   SessionRecord,
   SessionStatus
@@ -253,6 +257,82 @@ export class ManagedSession {
         "MESSAGE_SEND_FAILED",
         502,
         `Falha ao enviar mensagem: ${errorMessage(error)}`
+      );
+    }
+  }
+
+  /**
+   * Envio de midia: reusa o caminho do send-texto (mesma checagem de sessao,
+   * mesma resolucao de JID, mesmo evento `message.sent`) e monta o conteudo do
+   * Baileys pelo pipeline de midia — caption so em imagem, --ptt decide voice
+   * note, tipo fora da tabela e recusado antes de qualquer transmissao.
+   */
+  async sendMediaMessage(media: SendMediaRequest, buffer: Uint8Array): Promise<SendMediaResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    const jid = await this.resolveRecipientJid(media.to);
+    const descriptor: MediaDescriptor = {
+      kind: media.kind,
+      mimeType: media.mimeType,
+      payload: { kind: "buffer", buffer }
+    };
+    const content = buildMediaMessageContent(descriptor, {
+      ...(media.caption ? { caption: media.caption } : {}),
+      ...(media.ptt ? { ptt: true } : {})
+    });
+
+    try {
+      const sent = await this.socket.sendMessage(jid, content);
+      const response: SendMediaResponse = {
+        ok: true,
+        sessionId: this.session.id,
+        to: media.to,
+        jid,
+        kind: media.kind,
+        mimeType: media.mimeType,
+        caption: media.caption ?? null,
+        ptt: media.ptt === true,
+        size: buffer.byteLength,
+        messageId: sent?.key.id ?? null,
+        timestamp: nowUnix()
+      };
+
+      this.publisher.create("message.sent", this.session.id, {
+        messageId: response.messageId,
+        chatId: jid,
+        to: jid,
+        kind: media.kind,
+        mimeType: media.mimeType,
+        ...(media.caption ? { text: media.caption } : {}),
+        ptt: response.ptt
+      });
+      this.readModel.recordSentMediaMessage(
+        this.session.id,
+        jid,
+        media.kind,
+        media.caption ?? null,
+        response.messageId,
+        response.timestamp
+      );
+
+      return response;
+    } catch (error) {
+      this.publisher.create("message.error", this.session.id, {
+        to: media.to,
+        kind: media.kind,
+        error: errorMessage(error)
+      });
+
+      throw new AppError(
+        "MESSAGE_SEND_FAILED",
+        502,
+        `Falha ao enviar midia: ${errorMessage(error)}`
       );
     }
   }

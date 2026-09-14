@@ -199,4 +199,118 @@ describe("parseCliCommand", () => {
       json: true
     });
   });
+
+  it("parses download-media with optional --out", () => {
+    expect(parseCliCommand(["download-media", "pessoal", "556784020665", "3EB0MEDIA"])).toEqual({
+      kind: "download-media",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      messageId: "3EB0MEDIA",
+      json: false
+    });
+
+    expect(
+      parseCliCommand([
+        "download-media",
+        "pessoal",
+        "556784020665",
+        "3EB0MEDIA",
+        "--out",
+        "/tmp/foto.jpg",
+        "--json"
+      ])
+    ).toEqual({
+      kind: "download-media",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      messageId: "3EB0MEDIA",
+      out: "/tmp/foto.jpg",
+      json: true
+    });
+  });
+
+  it("rejects download-media without all three references", () => {
+    expect(() => parseCliCommand(["download-media", "pessoal", "556784020665"])).toThrow(
+      /Comando invalido/
+    );
+    expect(() => parseCliCommand(["download-media"])).toThrow(/Comando invalido/);
+  });
+
+  it("parses send-media with all flags", () => {
+    expect(
+      parseCliCommand([
+        "send-media",
+        "pessoal",
+        "556784020665",
+        "./foto.jpg",
+        "--type",
+        "image",
+        "--caption",
+        "Bom dia",
+        "--ptt",
+        "--json"
+      ])
+    ).toEqual({
+      kind: "send-media",
+      sessionId: "pessoal",
+      to: "556784020665",
+      file: "./foto.jpg",
+      type: "image",
+      caption: "Bom dia",
+      ptt: true,
+      json: true
+    });
+  });
+
+  it("parses send-media with defaults: sem tipo, sem caption, sem ptt", () => {
+    expect(parseCliCommand(["send-media", "pessoal", "556784020665", "./audio.ogg"])).toEqual({
+      kind: "send-media",
+      sessionId: "pessoal",
+      to: "556784020665",
+      file: "./audio.ogg",
+      ptt: false,
+      json: false
+    });
+  });
+
+  it("parses send-media with audio override and ptt", () => {
+    expect(
+      parseCliCommand(["send-media", "pessoal", "556784020665", "./voz", "--type", "audio", "--ptt"])
+    ).toEqual({
+      kind: "send-media",
+      sessionId: "pessoal",
+      to: "556784020665",
+      file: "./voz",
+      type: "audio",
+      ptt: true,
+      json: false
+    });
+  });
+
+  it("accepts a media kind in --type even when not released yet, so the pipeline classifies it", () => {
+    expect(
+      parseCliCommand(["send-media", "pessoal", "556784020665", "./clip", "--type", "video"])
+    ).toEqual({
+      kind: "send-media",
+      sessionId: "pessoal",
+      to: "556784020665",
+      file: "./clip",
+      type: "video",
+      ptt: false,
+      json: false
+    });
+  });
+
+  it("rejects send-media with a value that is not a media kind in --type", () => {
+    expect(() =>
+      parseCliCommand(["send-media", "pessoal", "556784020665", "./foto", "--type", "gif"])
+    ).toThrow(/--type/);
+  });
+
+  it("rejects send-media without session, destination and file", () => {
+    expect(() => parseCliCommand(["send-media", "pessoal"])).toThrow(/Comando invalido/);
+    expect(() => parseCliCommand(["send-media", "pessoal", "556784020665"])).toThrow(
+      /Comando invalido/
+    );
+  });
 });

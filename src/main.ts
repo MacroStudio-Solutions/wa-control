@@ -1,8 +1,15 @@
-import { AppError, isAppError } from "./shared/errors.ts";
+import { AppError, exitCodeForError, isAppError } from "./shared/errors.ts";
 import { LocalApiClient } from "./shared/localApiClient.ts";
 import { startDaemon } from "./daemon/startDaemon.ts";
+import {
+  assertConcreteDestination,
+  assertDirectoryWritable,
+  destinationPathFor,
+  resolveDownloadTarget
+} from "./cli/downloadTarget.ts";
 import { readOfflineStatusSnapshot } from "./cli/localStatus.ts";
 import { parseCliCommand } from "./cli/router.ts";
+import { resolveSendMediaSource } from "./cli/sendMediaSource.ts";
 import {
   renderChats,
   renderContacts,
@@ -156,6 +163,80 @@ async function run(): Promise<void> {
       return;
     }
 
+    case "send-media": {
+      // Classificacao ANTES de qualquer rede: arquivo, tipo, caption e ptt
+      // validados aqui; o daemon so ve a requisicao quando tudo confere.
+      const source = resolveSendMediaSource(command.file, {
+        ...(command.type ? { typeOverride: command.type } : {}),
+        ...(command.caption ? { caption: command.caption } : {}),
+        ...(command.ptt ? { ptt: true } : {})
+      });
+      const result = await client.sendMedia(
+        command.sessionId,
+        {
+          to: command.to,
+          kind: source.kind,
+          mimeType: source.mimeType,
+          ...(command.caption ? { caption: command.caption } : {}),
+          ...(command.ptt ? { ptt: true } : {})
+        },
+        source.buffer
+      );
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      const pttNote = result.ptt ? " (voice note)" : "";
+      const captionNote = result.caption ? `, caption "${result.caption}"` : "";
+      console.log(
+        `Midia enviada para ${result.jid}: ${result.kind} (${result.mimeType})${pttNote}, ${result.size} bytes${captionNote}${result.messageId ? ` (${result.messageId})` : ""}.`
+      );
+      return;
+    }
+
+    case "download-media": {
+      // Destino validado ANTES do fetch: falha aqui nao gera requisicao ao
+      // daemon nem escrita parcial.
+      const target = resolveDownloadTarget(command.out, command.messageId);
+      assertDirectoryWritable(target.directory);
+      assertConcreteDestination(target);
+
+      const media = await client.downloadMedia(
+        command.sessionId,
+        command.chat,
+        command.messageId
+      );
+      const destination = destinationPathFor(target, media.mimeType, media.messageId);
+      await Bun.write(destination, media.buffer);
+
+      if (command.json) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              kind: media.kind,
+              mimeType: media.mimeType,
+              size: media.size,
+              path: destination,
+              messageId: media.messageId,
+              chatJid: media.chatJid,
+              fileName: media.fileName
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      console.log(
+        `Midia baixada: ${media.kind} (${media.mimeType}), ${media.size} bytes -> ${destination}`
+      );
+      return;
+    }
+
     case "listen": {
       const response = await client.stream(command.sessionId, command.all, command.raw);
       await pipeResponseBody(response);
@@ -237,5 +318,5 @@ async function run(): Promise<void> {
 run().catch((error) => {
   const message = isAppError(error) ? error.message : error instanceof Error ? error.message : "Erro inesperado";
   console.error(message);
-  process.exit(1);
+  process.exit(exitCodeForError(error));
 });

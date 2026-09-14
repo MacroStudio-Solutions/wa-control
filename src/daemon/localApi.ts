@@ -13,6 +13,7 @@ import type {
 import { WEBHOOK_EVENTS, WEBHOOK_EVENT_KEYS } from "../shared/events.ts";
 import { DaemonRuntime } from "./daemonRuntime.ts";
 import { EventBus } from "./eventBus.ts";
+import { parseSendMediaRequest } from "./sendMediaRequest.ts";
 
 interface LocalApiOptions {
   runtime: DaemonRuntime;
@@ -264,6 +265,33 @@ export function startLocalApiServer({
             );
           }
 
+          if (request.method === "GET" && parts[2] === "download-media") {
+            const chat = url.searchParams.get("chat");
+            const messageId = url.searchParams.get("messageId");
+            if (!chat || !messageId) {
+              throw new AppError(
+                "INVALID_REQUEST",
+                400,
+                "Parametros `chat` e `messageId` obrigatorios."
+              );
+            }
+
+            const { record, download } = await runtime.downloadMedia(sessionId, chat, messageId);
+            return new Response(Buffer.from(download.buffer), {
+              headers: {
+                "content-type": "application/octet-stream",
+                "x-media-kind": download.kind,
+                "x-media-mime": download.mimeType,
+                "x-media-size": String(download.size),
+                "x-media-file-name": download.fileName
+                  ? encodeURIComponent(download.fileName)
+                  : "",
+                "x-media-chat-jid": record.chatJid,
+                "x-media-message-id": record.id
+              }
+            });
+          }
+
           if (request.method === "POST" && parts[2] === "disconnect") {
             const session = await runtime.sessions.disconnect(sessionId);
             return json({
@@ -280,6 +308,15 @@ export function startLocalApiServer({
           if (request.method === "POST" && parts[2] === "send") {
             const body = await parseJsonBody<SendMessageRequest>(request);
             return json(await runtime.sessions.sendTextMessage(sessionId, body.to, body.text));
+          }
+
+          // Metadados em headers x-media-*, bytes no corpo. A validacao de
+          // forma acontece ANTES de consumir o corpo: header faltante ou tipo
+          // fora do vocabulario e 400 sem ler o upload.
+          if (request.method === "POST" && parts[2] === "send-media") {
+            const media = parseSendMediaRequest(request);
+            const buffer = new Uint8Array(await request.arrayBuffer());
+            return json(await runtime.sendMedia(sessionId, media, buffer));
           }
         }
 

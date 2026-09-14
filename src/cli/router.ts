@@ -1,5 +1,6 @@
 import { AppError } from "../shared/errors.ts";
 import { parseEventList } from "../shared/events.ts";
+import { isMediaKind, type MediaKind } from "../media/mediaTypes.ts";
 
 export type CliCommand =
   | { kind: "help" }
@@ -14,6 +15,24 @@ export type CliCommand =
   | { kind: "disconnect"; sessionId: string }
   | { kind: "session.remove"; sessionId: string; yes: boolean }
   | { kind: "send"; sessionId: string; to: string; text: string }
+  | {
+      kind: "send-media";
+      sessionId: string;
+      to: string;
+      file: string;
+      type?: MediaKind;
+      caption?: string;
+      ptt: boolean;
+      json: boolean;
+    }
+  | {
+      kind: "download-media";
+      sessionId: string;
+      chat: string;
+      messageId: string;
+      out?: string;
+      json: boolean;
+    }
   | { kind: "listen"; sessionId: string | null; all: boolean; raw: boolean }
   | {
       kind: "webhook.add";
@@ -77,14 +96,21 @@ export function parseCliCommand(argv: string[]): CliCommand {
       arg !== "--raw" &&
       arg !== "--yes" &&
       arg !== "--base64" &&
+      arg !== "--ptt" &&
       arg !== "--limit" &&
       arg !== "--timeout-ms" &&
       arg !== "--max-attempts" &&
       arg !== "--events" &&
+      arg !== "--out" &&
+      arg !== "--type" &&
+      arg !== "--caption" &&
       source[index - 1] !== "--limit" &&
       source[index - 1] !== "--timeout-ms" &&
       source[index - 1] !== "--max-attempts" &&
-      source[index - 1] !== "--events"
+      source[index - 1] !== "--events" &&
+      source[index - 1] !== "--out" &&
+      source[index - 1] !== "--type" &&
+      source[index - 1] !== "--caption"
   );
 
   if (filtered[0] === "daemon" && filtered[1] === "start") {
@@ -162,6 +188,43 @@ export function parseCliCommand(argv: string[]): CliCommand {
       sessionId: filtered[1],
       to: filtered[2],
       text: filtered.slice(3).join(" ")
+    };
+  }
+
+  if (filtered[0] === "send-media" && filtered[1] && filtered[2] && filtered[3]) {
+    const typeFlag = extractStringFlag(argv, "--type");
+    const caption = extractStringFlag(argv, "--caption");
+
+    if (typeFlag !== undefined && !isMediaKind(typeFlag)) {
+      throw new AppError(
+        "INVALID_FLAG",
+        400,
+        `Valor invalido para --type: '${typeFlag}'. Use image ou audio.`
+      );
+    }
+
+    return {
+      kind: "send-media",
+      sessionId: filtered[1],
+      to: filtered[2],
+      file: filtered[3],
+      ...(typeFlag !== undefined ? { type: typeFlag as MediaKind } : {}),
+      ...(caption !== undefined ? { caption } : {}),
+      ptt: argv.includes("--ptt"),
+      json
+    };
+  }
+
+  if (filtered[0] === "download-media" && filtered[1] && filtered[2] && filtered[3]) {
+    const out = extractStringFlag(argv, "--out");
+
+    return {
+      kind: "download-media",
+      sessionId: filtered[1],
+      chat: filtered[2],
+      messageId: filtered[3],
+      ...(out !== undefined ? { out } : {}),
+      json
     };
   }
 

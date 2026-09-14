@@ -1,3 +1,5 @@
+import type { MediaKind } from "../media/mediaTypes.ts";
+
 export const SESSION_STATUSES = [
   "disconnected",
   "connecting",
@@ -79,6 +81,38 @@ export interface SendMessageResponse {
   text: string;
   messageId: string | null;
   timestamp: number;
+}
+
+export interface SendMediaRequest {
+  to: string;
+  kind: MediaKind;
+  mimeType: string;
+  caption?: string;
+  ptt?: boolean;
+}
+
+export interface SendMediaResponse {
+  ok: true;
+  sessionId: string;
+  to: string;
+  jid: string;
+  kind: MediaKind;
+  mimeType: string;
+  caption: string | null;
+  ptt: boolean;
+  size: number;
+  messageId: string | null;
+  timestamp: number;
+}
+
+export interface DownloadMediaResponse {
+  kind: string;
+  mimeType: string;
+  size: number;
+  fileName: string | null;
+  chatJid: string;
+  messageId: string;
+  buffer: Uint8Array;
 }
 
 export interface NormalizedEvent {
@@ -210,6 +244,7 @@ export interface MessageRecord {
   upsertType: string;
   messageType: string;
   text: string | null;
+  rawMessageType: string | null;
   status: string | null;
   unixSeconds: number | null;
   timestamp: string;

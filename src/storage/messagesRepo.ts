@@ -21,6 +21,7 @@ interface MessageRow {
   upsert_type: string;
   message_type: string;
   text: string | null;
+  raw_message_type: string | null;
   status: string | null;
   unix_seconds: number | null;
   timestamp: string;
@@ -48,6 +49,7 @@ function mapRow(row: MessageRow): MessageRecord {
     upsertType: row.upsert_type,
     messageType: row.message_type,
     text: row.text,
+    rawMessageType: row.raw_message_type,
     status: row.status,
     unixSeconds: row.unix_seconds,
     timestamp: row.timestamp,
@@ -57,6 +59,46 @@ function mapRow(row: MessageRow): MessageRecord {
 
 function placeholders(count: number, startAt: number): string {
   return Array.from({ length: count }, (_, index) => `?${startAt + index}`).join(", ");
+}
+
+/**
+ * Filtro de chat compartilhado por list e findById: ?1 fica reservado para
+ * session_id, entao os placeholders comecam no indice 2.
+ */
+function buildChatFilter(
+  exactJids: string[],
+  lookupKeys: string[]
+): { where: string | null; values: Array<number | string>; nextIndex: number } {
+  if (exactJids.length === 0 && lookupKeys.length === 0) {
+    return { where: null, values: [], nextIndex: 2 };
+  }
+
+  const conditions: string[] = [];
+  const values: Array<number | string> = [];
+  let nextIndex = 2;
+
+  if (exactJids.length > 0) {
+    const directPlaceholders = placeholders(exactJids.length, nextIndex);
+    values.push(...exactJids);
+    nextIndex += exactJids.length;
+
+    const lookupJidPlaceholders = placeholders(exactJids.length, nextIndex);
+    values.push(...exactJids);
+    nextIndex += exactJids.length;
+
+    conditions.push(
+      `(chat_jid IN (${directPlaceholders}) OR chat_lookup_jid IN (${lookupJidPlaceholders}))`
+    );
+  }
+
+  if (lookupKeys.length > 0) {
+    const lookupKeyPlaceholders = placeholders(lookupKeys.length, nextIndex);
+    values.push(...lookupKeys);
+    nextIndex += lookupKeys.length;
+    conditions.push(`chat_lookup_key IN (${lookupKeyPlaceholders})`);
+  }
+
+  return { where: conditions.join(" OR "), values, nextIndex };
 }
 
 export class MessagesRepo {
@@ -93,13 +135,14 @@ export class MessagesRepo {
           upsert_type,
           message_type,
           text,
+          raw_message_type,
           status,
           unix_seconds,
           timestamp,
           updated_at
         )
         VALUES (
-          ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
+          ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
         )
         ON CONFLICT(session_id, chat_jid, id) DO UPDATE SET
           chat_lookup_key = excluded.chat_lookup_key,
@@ -118,6 +161,7 @@ export class MessagesRepo {
           upsert_type = excluded.upsert_type,
           message_type = excluded.message_type,
           text = excluded.text,
+          raw_message_type = excluded.raw_message_type,
           status = excluded.status,
           unix_seconds = excluded.unix_seconds,
           timestamp = excluded.timestamp,
@@ -143,6 +187,7 @@ export class MessagesRepo {
         message.upsertType,
         message.messageType,
         message.text,
+        message.rawMessageType,
         message.status,
         message.unixSeconds,
         message.timestamp,
@@ -161,46 +206,48 @@ export class MessagesRepo {
   }
 
   list(sessionId: string, exactJids: string[], lookupKeys: string[], limit = 50): MessageRecord[] {
-    if (exactJids.length === 0 && lookupKeys.length === 0) {
+    const { where, values, nextIndex } = buildChatFilter(exactJids, lookupKeys);
+
+    if (!where) {
       return [];
-    }
-
-    const conditions: string[] = [];
-    const values: Array<number | string> = [sessionId];
-    let nextIndex = 2;
-
-    if (exactJids.length > 0) {
-      const directPlaceholders = placeholders(exactJids.length, nextIndex);
-      values.push(...exactJids);
-      nextIndex += exactJids.length;
-
-      const lookupJidPlaceholders = placeholders(exactJids.length, nextIndex);
-      values.push(...exactJids);
-      nextIndex += exactJids.length;
-
-      conditions.push(
-        `(chat_jid IN (${directPlaceholders}) OR chat_lookup_jid IN (${lookupJidPlaceholders}))`
-      );
-    }
-
-    if (lookupKeys.length > 0) {
-      const lookupKeyPlaceholders = placeholders(lookupKeys.length, nextIndex);
-      values.push(...lookupKeys);
-      nextIndex += lookupKeys.length;
-      conditions.push(`chat_lookup_key IN (${lookupKeyPlaceholders})`);
     }
 
     values.push(limit);
     const sql = `
       SELECT *
       FROM messages
-      WHERE session_id = ?1 AND (${conditions.join(" OR ")})
+      WHERE session_id = ?1 AND (${where})
       ORDER BY COALESCE(unix_seconds, 0) DESC, id DESC
       LIMIT ?${nextIndex}
     `;
 
-    const rows = this.db.query(sql).all(...values) as MessageRow[];
+    const rows = this.db.query(sql).all(sessionId, ...values) as MessageRow[];
     return rows.map(mapRow);
+  }
+
+  findById(
+    sessionId: string,
+    exactJids: string[],
+    lookupKeys: string[],
+    messageId: string
+  ): MessageRecord | null {
+    const { where, values, nextIndex } = buildChatFilter(exactJids, lookupKeys);
+
+    if (!where) {
+      return null;
+    }
+
+    const idIndex = nextIndex;
+    const sql = `
+      SELECT *
+      FROM messages
+      WHERE session_id = ?1 AND (${where}) AND id = ?${idIndex}
+      ORDER BY COALESCE(unix_seconds, 0) DESC, id DESC
+      LIMIT 1
+    `;
+
+    const row = this.db.query(sql).get(sessionId, ...values, messageId) as MessageRow | null;
+    return row ? mapRow(row) : null;
   }
 
   delete(sessionId: string, chatJid: string, id: string): void {

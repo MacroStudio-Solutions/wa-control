@@ -122,6 +122,80 @@ describe("normalizeIncomingMessage", () => {
 
     expect(normalizeIncomingMessage("pessoal", message, createAuthDir())).toBeNull();
   });
+
+  it("exposes the normalized type vocabulary with rawMessageType", () => {
+    const cases: Array<{
+      name: string;
+      payload: Record<string, unknown>;
+      type: string;
+      text: string | null;
+      rawMessageType: string | null;
+    }> = [
+      {
+        name: "texto puro",
+        payload: { conversation: "Bom dia" },
+        type: "text",
+        text: "Bom dia",
+        rawMessageType: "conversation"
+      },
+      {
+        name: "midia com caption",
+        payload: { imageMessage: { caption: "Aqui vai" } },
+        type: "image",
+        text: "Aqui vai",
+        rawMessageType: "imageMessage"
+      },
+      {
+        name: "midia sem caption",
+        payload: { audioMessage: { mimetype: "audio/ogg" } },
+        type: "audio",
+        text: null,
+        rawMessageType: "audioMessage"
+      },
+      {
+        name: "reacao",
+        payload: { reactionMessage: { text: "❤️" } },
+        type: "reaction",
+        text: "❤️",
+        rawMessageType: "reactionMessage"
+      },
+      {
+        name: "envelope efemero",
+        payload: { ephemeralMessage: { message: { conversation: "Sumira depois" } } },
+        type: "text",
+        text: "Sumira depois",
+        rawMessageType: "conversation"
+      },
+      {
+        name: "tipo nao mapeado",
+        payload: { protocolMessage: { type: 15 } },
+        type: "protocolMessage",
+        text: null,
+        rawMessageType: "protocolMessage"
+      }
+    ];
+
+    for (const testCase of cases) {
+      const message = directMessage({ remoteJid: "556784020665@s.whatsapp.net" });
+      (message as unknown as { message?: Record<string, unknown> }).message = testCase.payload;
+
+      const event = normalizeIncomingMessage("pessoal", message, createAuthDir());
+
+      expect(event?.type).toBe(testCase.type);
+      expect(event?.text).toBe(testCase.text);
+      expect(event?.rawMessageType).toBe(testCase.rawMessageType);
+    }
+  });
+
+  it("never emits unknown without rawMessageType", () => {
+    const message = directMessage({ remoteJid: "556784020665@s.whatsapp.net" });
+    (message as unknown as { message?: Record<string, unknown> }).message = { viewOnceMessageV2: {} };
+
+    const event = normalizeIncomingMessage("pessoal", message, createAuthDir());
+
+    expect(event?.type).toBe("unknown");
+    expect(event?.rawMessageType).toBe("viewOnceMessageV2");
+  });
 });
 
 describe("lid directory extraction", () => {

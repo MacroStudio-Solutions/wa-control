@@ -1,3 +1,4 @@
+import { connect as netConnect } from "node:net";
 import { AppError } from "./errors.ts";
 import { loadAppConfig } from "../config/config.ts";
 import { readLocalToken } from "../config/token.ts";
@@ -6,8 +7,11 @@ import type {
   ChatRecord,
   ContactRecord,
   CreateWebhookRequest,
+  DownloadMediaResponse,
   HealthResponse,
   MessageRecord,
+  SendMediaRequest,
+  SendMediaResponse,
   SendMessageRequest,
   SendMessageResponse,
   SessionCommandResponse,
@@ -17,6 +21,71 @@ import type {
   WebhookDeliveryRecord,
   WebhookRecord
 } from "./types.ts";
+
+const DAEMON_STOPPED_MESSAGE = "Daemon local nao esta rodando. Inicie com `wa daemon start`.";
+
+export const DEFAULT_TIMEOUTS = {
+  requestTimeoutMs: 1_500,
+  connectTimeoutMs: 25_000,
+  sendTimeoutMs: 15_000,
+  probeTimeoutMs: 400,
+  /**
+   * Midia (fetch de download e upload de envio) varia com rede e tamanho do
+   * arquivo; 60s e o teto proprio dela, distinto da leitura (1,5s) e do
+   * send-texto (15s). O timeout estourado numa operacao de midia NUNCA deve ser
+   * lido como "daemon parado" — a licao 0.5.0 e que classificacao mentirosa de
+   * timeout vira falso negativo e reenvio duplicado.
+   */
+  mediaTimeoutMs: 60_000
+} as const;
+
+export interface LocalApiClientTimeouts {
+  requestTimeoutMs?: number;
+  connectTimeoutMs?: number;
+  sendTimeoutMs?: number;
+  probeTimeoutMs?: number;
+  mediaTimeoutMs?: number;
+}
+
+type DaemonGate = "open" | "closed";
+
+const CONNECTION_REFUSAL_MARKERS = [
+  "econnrefused",
+  "connectionrefused",
+  "connection refused",
+  "unable to connect",
+  "ehostunreach",
+  "no route to host",
+  "enetunreach",
+  "network is unreachable",
+  "eaddrnotavail",
+  "address not available"
+];
+
+/**
+ * Recusa de conexao e a familia de erros em que a requisicao com certeza nao
+ * saiu da maquina: nada aceitando na porta ou sem rota ate ela. O timeout e o
+ * reset de socket no meio do voo NAO sao recusa — a requisicao pode ter sido
+ * entregue.
+ */
+export function isConnectionRefusal(error: unknown): boolean {
+  const fragments: string[] = [];
+  let current: unknown = error;
+
+  while (current instanceof Error) {
+    fragments.push(current.message);
+
+    const code = (current as { code?: string }).code;
+    if (code) {
+      fragments.push(code);
+    }
+
+    current = (current as { cause?: unknown }).cause;
+  }
+
+  const text = fragments.join(" ").toLowerCase();
+  return CONNECTION_REFUSAL_MARKERS.some((marker) => text.includes(marker));
+}
 
 async function parseError(response: Response): Promise<never> {
   let body: ApiErrorBody | null = null;
@@ -43,9 +112,40 @@ export class LocalApiClient {
    * fora do ar" de "daemon lento". `connect` e a excecao: ele segura a resposta
    * ate o WhatsApp emitir o QR, e com o limite curto toda tentativa de parear
    * morria aqui e aparecia como daemon parado.
+   *
+   * `send` e a outra excecao — e nao idempotente. Se o timeout estoura depois
+   * que o daemon aceitou a conexao, a mensagem PODE ter sido entregue: abortar
+   * cedo so esconde o resultado real e induz o reenvio duplicado. Por isso o
+   * send espera bem mais e, quando ainda assim estoura, reporta resultado
+   * incerto em vez de daemon parado.
    */
-  private readonly requestTimeoutMs = 1500;
-  private readonly connectTimeoutMs = 25_000;
+  private requestTimeoutMs: number = DEFAULT_TIMEOUTS.requestTimeoutMs;
+  private connectTimeoutMs: number = DEFAULT_TIMEOUTS.connectTimeoutMs;
+  private sendTimeoutMs: number = DEFAULT_TIMEOUTS.sendTimeoutMs;
+  private probeTimeoutMs: number = DEFAULT_TIMEOUTS.probeTimeoutMs;
+  private mediaTimeoutMs: number = DEFAULT_TIMEOUTS.mediaTimeoutMs;
+
+  constructor(timeouts: LocalApiClientTimeouts = {}) {
+    if (timeouts.requestTimeoutMs !== undefined) {
+      this.requestTimeoutMs = timeouts.requestTimeoutMs;
+    }
+
+    if (timeouts.connectTimeoutMs !== undefined) {
+      this.connectTimeoutMs = timeouts.connectTimeoutMs;
+    }
+
+    if (timeouts.sendTimeoutMs !== undefined) {
+      this.sendTimeoutMs = timeouts.sendTimeoutMs;
+    }
+
+    if (timeouts.probeTimeoutMs !== undefined) {
+      this.probeTimeoutMs = timeouts.probeTimeoutMs;
+    }
+
+    if (timeouts.mediaTimeoutMs !== undefined) {
+      this.mediaTimeoutMs = timeouts.mediaTimeoutMs;
+    }
+  }
 
   private buildHeaders(includeJson = false): HeadersInit {
     if (!this.token) {
@@ -62,21 +162,52 @@ export class LocalApiClient {
     };
   }
 
+  /**
+   * Sonda TCP curta que distingue "nada aceitando conexoes na porta" (daemon
+   * parado ou inalcancavel) de "porta aceitando". O `fetch` do Bun nao rejeita
+   * conexao recusada: ele reentra em silencio e so solta timeout no abort, o
+   * que tornaria impossivel classificar recusa de forma imediata por ele
+   * mesmo. Abrir o socket e o unico sinal confiavel — e instantaneo quando a
+   * recusa vem com RST, como na maquina do operador.
+   */
+  private probeDaemonGate(): Promise<DaemonGate> {
+    const url = new URL(this.baseUrl);
+
+    return new Promise<DaemonGate>((resolve) => {
+      const socket = netConnect({ host: url.hostname, port: Number(url.port) });
+      let settled = false;
+
+      const settle = (gate: DaemonGate) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        socket.destroy();
+        resolve(gate);
+      };
+
+      socket.on("connect", () => settle("open"));
+      socket.on("error", () => settle("closed"));
+
+      const timer = setTimeout(() => settle("closed"), this.probeTimeoutMs);
+      timer.unref?.();
+    });
+  }
+
   private async safeFetch(
     url: string,
     init?: RequestInit,
-    timeoutMs = this.requestTimeoutMs
+    timeoutMs = this.requestTimeoutMs,
+    timeoutErrorFactory?: () => AppError
   ): Promise<Response> {
     const controller = new AbortController();
-    const timeoutError = new AppError(
-      "DAEMON_UNAVAILABLE",
-      503,
-      "Daemon local nao esta rodando. Inicie com `wa daemon start`.",
-      {
-        url,
-        cause: "Request timed out"
-      }
-    );
+    const timeoutError = timeoutErrorFactory
+      ? timeoutErrorFactory()
+      : new AppError("DAEMON_UNAVAILABLE", 503, DAEMON_STOPPED_MESSAGE, {
+          url,
+          cause: "Request timed out"
+        });
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       const timeout = setTimeout(() => {
@@ -100,15 +231,19 @@ export class LocalApiClient {
         throw error;
       }
 
-      throw new AppError(
-        "DAEMON_UNAVAILABLE",
-        503,
-        "Daemon local nao esta rodando. Inicie com `wa daemon start`.",
-        {
-          url,
-          cause: error instanceof Error ? error.message : "Unexpected error"
-        }
-      );
+      /**
+       * Operacao com desfecho incerto (send): qualquer falha de rede que nao
+       * seja recusa de conexao deixou a requisicao em voo — o resultado real
+       * e desconhecido e reportar daemon parado seria mentira.
+       */
+      if (timeoutErrorFactory && !isConnectionRefusal(error)) {
+        throw timeoutErrorFactory();
+      }
+
+      throw new AppError("DAEMON_UNAVAILABLE", 503, DAEMON_STOPPED_MESSAGE, {
+        url,
+        cause: error instanceof Error ? error.message : "Unexpected error"
+      });
     }
   }
 
@@ -152,6 +287,63 @@ export class LocalApiClient {
     );
   }
 
+  /**
+   * Download de midia: o daemon busca do WhatsApp e devolve os bytes com os
+   * metadados em headers. Usa o timeout dedicado de midia (60s) e, quando ele
+   * estoura, NUNCA le como daemon parado — a resposta pode estar a caminho de
+   * um arquivo grande numa rede lenta.
+   */
+  async downloadMedia(
+    sessionId: string,
+    chat: string,
+    messageId: string
+  ): Promise<DownloadMediaResponse> {
+    const query = new URLSearchParams({
+      chat,
+      messageId
+    });
+    const mediaTimeout = () =>
+      new AppError(
+        "MEDIA_TIMEOUT",
+        504,
+        `O download da midia nao terminou em ${Math.round(this.mediaTimeoutMs / 1000)}s (rede lenta ou arquivo grande). Tente novamente.`,
+        {
+          sessionId,
+          chat,
+          messageId,
+          cause: "Media request timed out"
+        }
+      );
+
+    const response = await this.safeFetch(
+      `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/download-media?${query.toString()}`,
+      {
+        headers: this.buildHeaders()
+      },
+      this.mediaTimeoutMs,
+      mediaTimeout
+    );
+
+    if (!response.ok) {
+      await parseError(response);
+    }
+
+    const header = (name: string): string | null => response.headers.get(name);
+    const declaredSize = Number(header("x-media-size"));
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    const encodedFileName = header("x-media-file-name");
+
+    return {
+      kind: header("x-media-kind") ?? "unknown",
+      mimeType: header("x-media-mime") ?? "application/octet-stream",
+      size: Number.isFinite(declaredSize) && declaredSize > 0 ? declaredSize : buffer.byteLength,
+      fileName: encodedFileName ? decodeURIComponent(encodedFileName) : null,
+      chatJid: header("x-media-chat-jid") ?? "",
+      messageId: header("x-media-message-id") ?? messageId,
+      buffer
+    };
+  }
+
   async connect(sessionId: string): Promise<SessionCommandResponse> {
     return this.requestJson<SessionCommandResponse>(
       `/sessions/${encodeURIComponent(sessionId)}/connect`,
@@ -183,14 +375,99 @@ export class LocalApiClient {
   }
 
   async send(sessionId: string, payload: SendMessageRequest): Promise<SendMessageResponse> {
-    return this.requestJson(
+    const sendUrl = `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/send`;
+    const uncertainOutcome = () =>
+      new AppError(
+        "SEND_RESULT_UNCERTAIN",
+        504,
+        `Resultado incerto: o daemon aceitou a conexao, mas a resposta do envio nao chegou em tempo e a mensagem PODE ter sido enviada. Confira o historico com \`wa messages ${sessionId} ${payload.to}\` antes de reenviar para nao duplicar.`,
+        {
+          url: sendUrl,
+          cause: "Send request outcome unknown"
+        }
+      );
+
+    const gate = await this.probeDaemonGate();
+
+    if (gate === "closed") {
+      throw new AppError("DAEMON_UNAVAILABLE", 503, DAEMON_STOPPED_MESSAGE, {
+        url: sendUrl,
+        cause: "Connection refused"
+      });
+    }
+
+    return this.requestJson<SendMessageResponse>(
       `/sessions/${encodeURIComponent(sessionId)}/send`,
       {
         method: "POST",
         body: JSON.stringify(payload)
       },
-      true
+      true,
+      this.sendTimeoutMs,
+      uncertainOutcome
     );
+  }
+
+  /**
+   * Envio de midia: mesma disciplina do send-texto — sonda TCP antes do POST
+   * (recusa = daemon parado, exit 1) e, depois de a conexao ser aceita, timeout
+   * proprio de midia (60s, upload varia com rede e tamanho). Estourado o
+   * timeout, o resultado e SEND_RESULT_UNCERTAIN (exit 2): a midia PODE ter
+   * sido entregue e conferir `messages` antes de reenviar e obrigatorio.
+   * Bytes viajam no corpo; metadados em headers x-media-*.
+   */
+  async sendMedia(
+    sessionId: string,
+    request: SendMediaRequest,
+    buffer: Uint8Array
+  ): Promise<SendMediaResponse> {
+    const sendUrl = `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/send-media`;
+    const uncertainOutcome = () =>
+      new AppError(
+        "SEND_RESULT_UNCERTAIN",
+        504,
+        `Resultado incerto: o daemon aceitou a conexao, mas o upload da midia nao terminou em ${Math.round(
+          this.mediaTimeoutMs / 1000
+        )}s e a midia PODE ter sido enviada. Confira o historico com \`wa messages ${sessionId} ${request.to}\` antes de reenviar para nao duplicar.`,
+        {
+          url: sendUrl,
+          cause: "Media send outcome unknown"
+        }
+      );
+
+    const gate = await this.probeDaemonGate();
+
+    if (gate === "closed") {
+      throw new AppError("DAEMON_UNAVAILABLE", 503, DAEMON_STOPPED_MESSAGE, {
+        url: sendUrl,
+        cause: "Connection refused"
+      });
+    }
+
+    const response = await this.safeFetch(
+      sendUrl,
+      {
+        method: "POST",
+        headers: {
+          ...this.buildHeaders(),
+          "content-type": "application/octet-stream",
+          "x-media-to": request.to,
+          "x-media-kind": request.kind,
+          "x-media-mime": request.mimeType,
+          ...(request.caption ? { "x-media-caption": encodeURIComponent(request.caption) } : {}),
+          ...(request.ptt ? { "x-media-ptt": "1" } : {})
+        },
+        body: Buffer.from(buffer)
+      },
+      this.mediaTimeoutMs,
+      uncertainOutcome
+    );
+
+    if (!response.ok) {
+      await parseError(response);
+    }
+
+    return (await response.json()) as SendMediaResponse;
   }
 
   async stream(sessionId: string | null, all: boolean, raw = false): Promise<Response> {
@@ -289,7 +566,8 @@ export class LocalApiClient {
     path: string,
     init: RequestInit = {},
     includeJson = false,
-    timeoutMs = this.requestTimeoutMs
+    timeoutMs = this.requestTimeoutMs,
+    timeoutErrorFactory?: () => AppError
   ): Promise<T> {
     const response = await this.safeFetch(
       `${this.baseUrl}${path}`,
@@ -297,7 +575,8 @@ export class LocalApiClient {
         ...init,
         headers: this.buildHeaders(includeJson)
       },
-      timeoutMs
+      timeoutMs,
+      timeoutErrorFactory
     );
 
     if (!response.ok) {

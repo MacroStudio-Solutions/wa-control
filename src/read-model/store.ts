@@ -1,4 +1,5 @@
 import type { BaileysEventMap, WAMessage, WASocket } from "@whiskeysockets/baileys";
+import { extractMessageContentInfo } from "../baileys/messageContent.ts";
 import type { AppConfig, ChatRecord, ContactRecord, MessageRecord, NormalizedEvent } from "../shared/types.ts";
 import {
   buildQueryCandidates,
@@ -7,81 +8,11 @@ import {
   projectAddress,
   type ProjectedAddress
 } from "../shared/jids.ts";
+import { isMediaKind } from "../media/mediaTypes.ts";
 import { nowIso, nowUnix } from "../shared/utils.ts";
 import { ChatsRepo } from "../storage/chatsRepo.ts";
 import { ContactsRepo } from "../storage/contactsRepo.ts";
 import { MessagesRepo } from "../storage/messagesRepo.ts";
-
-function extractMessageType(message: Record<string, unknown> | undefined): string {
-  if (!message) {
-    return "unknown";
-  }
-
-  for (const [key, value] of Object.entries(message)) {
-    if (value) {
-      return key;
-    }
-  }
-
-  return "unknown";
-}
-
-function extractMessageText(message: Record<string, unknown> | undefined): string | null {
-  if (!message) {
-    return null;
-  }
-
-  if (typeof message.conversation === "string") {
-    return message.conversation;
-  }
-
-  if (typeof message.extendedTextMessage === "object" && message.extendedTextMessage) {
-    const candidate = (message.extendedTextMessage as Record<string, unknown>).text;
-    if (typeof candidate === "string") {
-      return candidate;
-    }
-  }
-
-  for (const key of [
-    "imageMessage",
-    "videoMessage",
-    "documentMessage"
-  ]) {
-    const entry = message[key];
-    if (typeof entry === "object" && entry) {
-      const candidate = (entry as Record<string, unknown>).caption;
-      if (typeof candidate === "string") {
-        return candidate;
-      }
-    }
-  }
-
-  if (typeof message.buttonsResponseMessage === "object" && message.buttonsResponseMessage) {
-    const candidate = (message.buttonsResponseMessage as Record<string, unknown>).selectedDisplayText;
-    if (typeof candidate === "string") {
-      return candidate;
-    }
-  }
-
-  if (typeof message.listResponseMessage === "object" && message.listResponseMessage) {
-    const singleSelectReply = (message.listResponseMessage as Record<string, unknown>).singleSelectReply;
-    if (typeof singleSelectReply === "object" && singleSelectReply) {
-      const candidate = (singleSelectReply as Record<string, unknown>).selectedRowId;
-      if (typeof candidate === "string") {
-        return candidate;
-      }
-    }
-  }
-
-  if (typeof message.reactionMessage === "object" && message.reactionMessage) {
-    const candidate = (message.reactionMessage as Record<string, unknown>).text;
-    if (typeof candidate === "string") {
-      return candidate;
-    }
-  }
-
-  return null;
-}
 
 function normalizeTimestamp(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -218,13 +149,20 @@ export class ReadModelStore {
           continue;
         }
 
-        this.recordSentTextMessage(
-          event.sessionId,
-          chatJid,
-          typeof event.text === "string" ? event.text : "",
-          typeof event.messageId === "string" ? event.messageId : null,
-          typeof event.timestamp === "number" ? event.timestamp : nowUnix()
-        );
+        const messageId = typeof event.messageId === "string" ? event.messageId : null;
+        const timestamp =
+          typeof event.timestamp === "number" ? event.timestamp : nowUnix();
+        const text = typeof event.text === "string" ? event.text : null;
+        const kind = typeof event.kind === "string" ? event.kind : null;
+
+        // Midia e texto dividem o mesmo evento de envio; o kind decide como a
+        // linha e projetada, mantendo o replay fiel ao que aconteceu.
+        if (kind && isMediaKind(kind)) {
+          this.recordSentMediaMessage(event.sessionId, chatJid, kind, text, messageId, timestamp);
+          continue;
+        }
+
+        this.recordSentTextMessage(event.sessionId, chatJid, text ?? "", messageId, timestamp);
         continue;
       }
 
@@ -254,6 +192,15 @@ export class ReadModelStore {
     return this.messagesRepo.list(sessionId, query.exactJids, query.lookupKeys, limit);
   }
 
+  /**
+   * Resolucao de mensagem por chat + messageId — as mesmas referencias que
+   * `messages` e o webhook entregam. Base do download de midia.
+   */
+  findMessage(sessionId: string, chat: string, messageId: string): MessageRecord | null {
+    const query = buildQueryCandidates(this.getAuthDir(sessionId), chat);
+    return this.messagesRepo.findById(sessionId, query.exactJids, query.lookupKeys, messageId);
+  }
+
   deleteSession(sessionId: string): void {
     this.messagesRepo.deleteSession(sessionId);
     this.contactsRepo.deleteSession(sessionId);
@@ -264,6 +211,33 @@ export class ReadModelStore {
     sessionId: string,
     chatJid: string,
     text: string,
+    messageId: string | null,
+    unixSeconds: number
+  ): void {
+    this.recordSentMessage(sessionId, chatJid, "text", text, messageId, unixSeconds);
+  }
+
+  /**
+   * Midia enviada pelo CLI: o kind normalizado vira o messageType da linha e a
+   * caption (quando existe) e o texto legivel — a mesma posicao de conteudo do
+   * triplo normalizado das mensagens recebidas.
+   */
+  recordSentMediaMessage(
+    sessionId: string,
+    chatJid: string,
+    kind: string,
+    text: string | null,
+    messageId: string | null,
+    unixSeconds: number
+  ): void {
+    this.recordSentMessage(sessionId, chatJid, kind, text, messageId, unixSeconds);
+  }
+
+  private recordSentMessage(
+    sessionId: string,
+    chatJid: string,
+    messageType: string,
+    text: string | null,
     messageId: string | null,
     unixSeconds: number
   ): void {
@@ -290,8 +264,9 @@ export class ReadModelStore {
       pushName: null,
       fromMe: true,
       upsertType: "append",
-      messageType: "text",
+      messageType,
       text,
+      rawMessageType: null,
       status: null,
       unixSeconds,
       timestamp,
@@ -368,6 +343,7 @@ export class ReadModelStore {
       upsertType: "notify",
       messageType: typeof event.type === "string" ? event.type : "unknown",
       text: typeof event.text === "string" ? event.text : null,
+      rawMessageType: typeof event.rawMessageType === "string" ? event.rawMessageType : null,
       status: null,
       unixSeconds,
       timestamp: new Date(unixSeconds * 1000).toISOString(),
@@ -459,6 +435,7 @@ export class ReadModelStore {
       return null;
     }
 
+    const contentInfo = extractMessageContentInfo(rawMessage.message);
     const chatAddress = projectAddress(authDir, chatId, [
       typeof rawMessage.key?.remoteJidAlt === "string" ? rawMessage.key.remoteJidAlt : null
     ]);
@@ -491,8 +468,9 @@ export class ReadModelStore {
       pushName: typeof rawMessage.pushName === "string" ? rawMessage.pushName : null,
       fromMe: Boolean(rawMessage.key?.fromMe),
       upsertType,
-      messageType: extractMessageType(rawMessage.message as Record<string, unknown> | undefined),
-      text: extractMessageText(rawMessage.message as Record<string, unknown> | undefined),
+      messageType: contentInfo.type,
+      text: contentInfo.text,
+      rawMessageType: contentInfo.rawMessageType,
       status:
         rawMessage.status === undefined || rawMessage.status === null
           ? null
@@ -559,9 +537,23 @@ export class ReadModelStore {
         existing.upsertType
       );
 
+      // Um `messages.update` de ack de status chega sem conteudo (`update.message`
+      // ausente) e o extrator devolve unknown/null para ele. Espalhar esse partial
+      // por cima do registro apagaria o conteudo valido gravado pelo envio ou pela
+      // recepcao, deixando a linha unknown seca — so substituimos tipo/conteudo
+      // quando a atualizacao traz extracao informativa.
+      const informativeContent = partial !== null && partial.messageType !== "unknown";
+
       this.messagesRepo.upsert({
         ...existing,
         ...(partial ?? {}),
+        ...(informativeContent
+          ? {}
+          : {
+              messageType: existing.messageType,
+              text: existing.text,
+              rawMessageType: existing.rawMessageType
+            }),
         status:
           update.update?.status === undefined || update.update?.status === null
             ? existing.status
