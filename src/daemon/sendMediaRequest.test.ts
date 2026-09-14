@@ -53,6 +53,32 @@ describe("parseSendMediaRequest", () => {
     expect(parsed.caption).toBeUndefined();
   });
 
+  it("documento com nome de arquivo decodificado do header", () => {
+    const parsed = parseSendMediaRequest(
+      requestWithHeaders({
+        "x-media-to": "556784020665",
+        "x-media-kind": "document",
+        "x-media-mime": "application/pdf",
+        "x-media-file-name": encodeURIComponent("Relatório 2026.pdf")
+      })
+    );
+
+    expect(parsed.kind).toBe("document");
+    expect(parsed.fileName).toBe("Relatório 2026.pdf");
+  });
+
+  it("sem header de fileName, o campo fica ausente", () => {
+    const parsed = parseSendMediaRequest(
+      requestWithHeaders({
+        "x-media-to": "556784020665",
+        "x-media-kind": "video",
+        "x-media-mime": "video/mp4"
+      })
+    );
+
+    expect(parsed.fileName).toBeUndefined();
+  });
+
   it("header faltante vira INVALID_REQUEST antes de tocar o corpo", () => {
     for (const headers of [
       { "x-media-kind": "image", "x-media-mime": "image/jpeg" },

@@ -262,6 +262,27 @@ describe("parseCliCommand", () => {
     });
   });
 
+  it("parses send-media with --filename for documents", () => {
+    expect(
+      parseCliCommand([
+        "send-media",
+        "pessoal",
+        "556784020665",
+        "./relatorio.pdf",
+        "--filename",
+        "Relatorio 2026.pdf"
+      ])
+    ).toEqual({
+      kind: "send-media",
+      sessionId: "pessoal",
+      to: "556784020665",
+      file: "./relatorio.pdf",
+      filename: "Relatorio 2026.pdf",
+      ptt: false,
+      json: false
+    });
+  });
+
   it("parses send-media with defaults: sem tipo, sem caption, sem ptt", () => {
     expect(parseCliCommand(["send-media", "pessoal", "556784020665", "./audio.ogg"])).toEqual({
       kind: "send-media",
@@ -289,16 +310,26 @@ describe("parseCliCommand", () => {
 
   it("accepts a media kind in --type even when not released yet, so the pipeline classifies it", () => {
     expect(
-      parseCliCommand(["send-media", "pessoal", "556784020665", "./clip", "--type", "video"])
+      parseCliCommand(["send-media", "pessoal", "556784020665", "./clip", "--type", "sticker"])
     ).toEqual({
       kind: "send-media",
       sessionId: "pessoal",
       to: "556784020665",
       file: "./clip",
-      type: "video",
+      type: "sticker",
       ptt: false,
       json: false
     });
+  });
+
+  it("names the current released types when --type is not a media kind", () => {
+    try {
+      parseCliCommand(["send-media", "pessoal", "556784020665", "./foto", "--type", "gif"]);
+      throw new Error("deveria ter rejeitado");
+    } catch (error) {
+      expect((error as Error).message).toContain("--type");
+      expect((error as Error).message).toContain("image, audio, video, document");
+    }
   });
 
   it("rejects send-media with a value that is not a media kind in --type", () => {
@@ -312,5 +343,207 @@ describe("parseCliCommand", () => {
     expect(() => parseCliCommand(["send-media", "pessoal", "556784020665"])).toThrow(
       /Comando invalido/
     );
+  });
+
+  it("parses typing with the default composing indicator", () => {
+    expect(parseCliCommand(["typing", "pessoal", "556784020665"])).toEqual({
+      kind: "typing",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      recording: false,
+      json: false
+    });
+
+    expect(parseCliCommand(["typing", "pessoal", "556784020665", "--recording", "--json"])).toEqual({
+      kind: "typing",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      recording: true,
+      json: true
+    });
+  });
+
+  it("parses read without message id, which marks the latest message", () => {
+    expect(parseCliCommand(["read", "pessoal", "556784020665"])).toEqual({
+      kind: "read",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      json: false
+    });
+
+    expect(
+      parseCliCommand(["read", "pessoal", "556784020665", "--message-id", "3EB0MSG", "--json"])
+    ).toEqual({
+      kind: "read",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      messageId: "3EB0MSG",
+      json: true
+    });
+  });
+
+  it("parses react with the emoji as the fourth positional", () => {
+    expect(parseCliCommand(["react", "pessoal", "556784020665", "3EB0MSG", "👍"])).toEqual({
+      kind: "react",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      messageId: "3EB0MSG",
+      emoji: "👍",
+      json: false
+    });
+  });
+
+  it("maps the `.` emoji alias to the empty emoji, which removes the reaction", () => {
+    expect(parseCliCommand(["react", "pessoal", "556784020665", "3EB0MSG", "."])).toEqual({
+      kind: "react",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      messageId: "3EB0MSG",
+      emoji: "",
+      json: false
+    });
+  });
+
+  it("rejects react without the emoji positional", () => {
+    expect(() => parseCliCommand(["react", "pessoal", "556784020665", "3EB0MSG"])).toThrow(
+      /wa react/
+    );
+  });
+
+  it("parses delete with chat and message id", () => {
+    expect(parseCliCommand(["delete", "pessoal", "556784020665", "3EB0MSG", "--json"])).toEqual({
+      kind: "delete",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      messageId: "3EB0MSG",
+      json: true
+    });
+  });
+
+  it("rejects delete without all three references", () => {
+    expect(() => parseCliCommand(["delete", "pessoal", "556784020665"])).toThrow(
+      /Comando invalido/
+    );
+  });
+
+  it("parses poll with question and options preserving spaces", () => {
+    expect(
+      parseCliCommand([
+        "poll",
+        "pessoal",
+        "556784020665",
+        "Qual o melhor dia?",
+        "Segunda",
+        "Sexta"
+      ])
+    ).toEqual({
+      kind: "poll",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      question: "Qual o melhor dia?",
+      options: ["Segunda", "Sexta"],
+      json: false
+    });
+  });
+
+  it("fails poll with a single option in local validation, before any network contact", () => {
+    expect(() => parseCliCommand(["poll", "pessoal", "556784020665", "Pergunta?", "unica"])).toThrow(
+      /no minimo 2 opcoes/
+    );
+    expect(() => parseCliCommand(["poll", "pessoal", "556784020665", "Pergunta?"])).toThrow(
+      /no minimo 2 opcoes/
+    );
+  });
+
+  it("parses group create with subject and optional participants", () => {
+    expect(parseCliCommand(["group", "create", "pessoal", "Familia"])).toEqual({
+      kind: "group.create",
+      sessionId: "pessoal",
+      subject: "Familia",
+      participants: [],
+      json: false
+    });
+
+    expect(
+      parseCliCommand([
+        "group",
+        "create",
+        "pessoal",
+        "Meu grupo",
+        "--participants",
+        "556784020665,5511999999999",
+        "--json"
+      ])
+    ).toEqual({
+      kind: "group.create",
+      sessionId: "pessoal",
+      subject: "Meu grupo",
+      participants: ["556784020665", "5511999999999"],
+      json: true
+    });
+  });
+
+  it("rejects group create without a subject", () => {
+    expect(() => parseCliCommand(["group", "create", "pessoal"])).toThrow(/Uso: wa group/);
+    expect(() => parseCliCommand(["group"])).toThrow(/Uso: wa group/);
+    expect(() => parseCliCommand(["group", "voar"])).toThrow(/Uso: wa group/);
+  });
+
+  it("parses group info with session and group jid", () => {
+    expect(
+      parseCliCommand(["group", "info", "pessoal", "120345678901-234567890@g.us", "--json"])
+    ).toEqual({
+      kind: "group.info",
+      sessionId: "pessoal",
+      groupJid: "120345678901-234567890@g.us",
+      json: true
+    });
+  });
+
+  it("parses the four participant actions with one or more numbers", () => {
+    expect(
+      parseCliCommand(["group", "add", "pessoal", "120345678901-234567890@g.us", "556784020665"])
+    ).toEqual({
+      kind: "group.participants",
+      sessionId: "pessoal",
+      groupJid: "120345678901-234567890@g.us",
+      action: "add",
+      participants: ["556784020665"],
+      json: false
+    });
+
+    expect(
+      parseCliCommand([
+        "group",
+        "demote",
+        "pessoal",
+        "120345678901-234567890@g.us",
+        "556784020665",
+        "5511999999999",
+        "--json"
+      ])
+    ).toEqual({
+      kind: "group.participants",
+      sessionId: "pessoal",
+      groupJid: "120345678901-234567890@g.us",
+      action: "demote",
+      participants: ["556784020665", "5511999999999"],
+      json: true
+    });
+  });
+
+  it("rejects participant actions without at least one number", () => {
+    expect(() =>
+      parseCliCommand(["group", "remove", "pessoal", "120345678901-234567890@g.us"])
+    ).toThrow(/ao menos um numero/);
+  });
+
+  it("parses group leave with session and group jid", () => {
+    expect(parseCliCommand(["group", "leave", "pessoal", "120345678901-234567890@g.us"])).toEqual({
+      kind: "group.leave",
+      sessionId: "pessoal",
+      groupJid: "120345678901-234567890@g.us",
+      json: false
+    });
   });
 });

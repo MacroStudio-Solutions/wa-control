@@ -1,6 +1,7 @@
 import { extractMessageContent, getContentType } from "@whiskeysockets/baileys";
 import type { AnyMediaMessageContent, WAMessage } from "@whiskeysockets/baileys";
 import { AppError } from "../shared/errors.ts";
+import { mimeForMediaKind } from "./mediaInference.ts";
 import {
   assertMediaKindSupported,
   MEDIA_ERROR_CODES,
@@ -78,13 +79,15 @@ export function describeIncomingMedia(
 
 export interface SendMediaOptions {
   caption?: string;
+  fileName?: string;
   ptt?: boolean;
 }
 
 /**
  * Monta o AnyMediaMessageContent do Baileys a partir do descritor. Envio exige
- * payload em buffer; caption so existe em imagem (o audio do WhatsApp nao
- * leva legenda); --ptt e o que decide voice note versus anexo.
+ * payload em buffer; caption existe em imagem e video (audio e documento nao
+ * levam legenda); --filename da o nome do documento (o WhatsApp so o aceita
+ * nesse tipo); --ptt e o que decide voice note versus anexo.
  */
 export function buildMediaMessageContent(
   descriptor: MediaDescriptor,
@@ -112,6 +115,13 @@ export function buildMediaMessageContent(
         ...(mimetype ? { mimetype } : {})
       };
 
+    case "video":
+      return {
+        video: buffer,
+        ...(options.caption ? { caption: options.caption } : {}),
+        ...(mimetype ? { mimetype } : {})
+      };
+
     case "audio":
       if (options.caption) {
         throw new AppError(
@@ -125,6 +135,29 @@ export function buildMediaMessageContent(
         audio: buffer,
         ptt: options.ptt === true,
         ...(mimetype ? { mimetype } : {})
+      };
+
+    case "document":
+      if (options.caption) {
+        throw new AppError(
+          "INVALID_FLAG",
+          400,
+          "Caption nao e suportada para documento; o nome do arquivo vai em --filename."
+        );
+      }
+
+      if (!options.fileName) {
+        throw new AppError(
+          "INVALID_FLAG",
+          400,
+          "Envio de documento exige um nome de arquivo; informe --filename."
+        );
+      }
+
+      return {
+        document: buffer,
+        mimetype: descriptor.mimeType ?? mimeForMediaKind("document"),
+        fileName: options.fileName
       };
 
     default:

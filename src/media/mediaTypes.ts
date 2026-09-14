@@ -23,8 +23,8 @@ export const MEDIA_ERROR_CODES = {
 export const SUPPORTED_MEDIA_KINDS: Record<MediaKind, boolean> = {
   image: true,
   audio: true,
-  video: false,
-  document: false,
+  video: true,
+  document: true,
   sticker: false
 };
 

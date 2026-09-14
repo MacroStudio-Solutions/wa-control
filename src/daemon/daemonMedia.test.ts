@@ -227,23 +227,45 @@ describe("DaemonRuntime.downloadMedia", () => {
     }
   });
 
-  it("tipo nao liberado vira MEDIA_TYPE_NOT_SUPPORTED_YET antes do fetch", async () => {
+  it("baixa video ao vivo com o MIME declarado", async () => {
     const fixture = createRuntime();
     try {
       seedLiveMessage(fixture, {
         key: { remoteJid: "556784020665@s.whatsapp.net", fromMe: false, id: "3EB0VID" },
         pushName: "Priscila",
         messageTimestamp: 1_783_506_977,
-        message: { videoMessage: { mimetype: "video/mp4" } }
+        message: { videoMessage: { mimetype: "video/mp4", fileLength: 5 } }
+      } as unknown as WAMessage);
+
+      const result = await fixture.runtime.downloadMedia("pessoal", "556784020665", "3EB0VID");
+
+      expect(result.record.id).toBe("3EB0VID");
+      expect(result.download.kind).toBe("video");
+      expect(result.download.mimeType).toBe("video/mp4");
+      expect(result.download.size).toBe(3);
+    } finally {
+      fixture.db.close();
+    }
+  });
+
+  it("tipo nao liberado (sticker) vira MEDIA_TYPE_NOT_SUPPORTED_YET antes do fetch", async () => {
+    const fixture = createRuntime();
+    try {
+      seedLiveMessage(fixture, {
+        key: { remoteJid: "556784020665@s.whatsapp.net", fromMe: false, id: "3EB0STK" },
+        pushName: "Priscila",
+        messageTimestamp: 1_783_506_977,
+        message: { stickerMessage: { mimetype: "image/webp" } }
       } as unknown as WAMessage);
 
       const error = (await captureError(
-        fixture.runtime.downloadMedia("pessoal", "556784020665", "3EB0VID")
+        fixture.runtime.downloadMedia("pessoal", "556784020665", "3EB0STK")
       )) as Error;
 
       expect(isAppError(error)).toBe(true);
       if (isAppError(error)) {
         expect(error.code).toBe("MEDIA_TYPE_NOT_SUPPORTED_YET");
+        expect(error.message).toContain("image, audio, video, document");
       }
     } finally {
       fixture.db.close();

@@ -7,9 +7,23 @@ import type {
   ChatRecord,
   ContactRecord,
   CreateWebhookRequest,
+  DeleteMessageRequest,
+  DeleteMessageResponse,
   DownloadMediaResponse,
+  GroupCreateRequest,
+  GroupCreateResponse,
+  GroupInfoResponse,
+  GroupLeaveResponse,
+  GroupParticipantsRequest,
+  GroupParticipantsResponse,
   HealthResponse,
   MessageRecord,
+  PollRequest,
+  PollResponse,
+  ReactRequest,
+  ReactResponse,
+  ReadRequest,
+  ReadResponse,
   SendMediaRequest,
   SendMediaResponse,
   SendMessageRequest,
@@ -18,11 +32,26 @@ import type {
   SessionQrResponse,
   SessionRecord,
   StatusResponse,
+  TypingRequest,
+  TypingResponse,
   WebhookDeliveryRecord,
   WebhookRecord
 } from "./types.ts";
 
 const DAEMON_STOPPED_MESSAGE = "Daemon local nao esta rodando. Inicie com `wa daemon start`.";
+
+function uncertainOutcomeFor(url: string, outcomeDescription: string): () => AppError {
+  return () =>
+    new AppError(
+      "SEND_RESULT_UNCERTAIN",
+      504,
+      `Resultado incerto: o daemon aceitou a conexao, mas ${outcomeDescription}.`,
+      {
+        url,
+        cause: "Chat operation outcome unknown"
+      }
+    );
+}
 
 export const DEFAULT_TIMEOUTS = {
   requestTimeoutMs: 1_500,
@@ -87,6 +116,17 @@ export function isConnectionRefusal(error: unknown): boolean {
   return CONNECTION_REFUSAL_MARKERS.some((marker) => text.includes(marker));
 }
 
+/**
+ * Rota ausente no daemon em execucao e a assinatura da janela de upgrade: CLI
+ * nova chamando rota aditiva que o daemon velho ainda nao conhece. O fallback
+ * do daemon responde exatamente { code: "NOT_FOUND" } com 404; 404s de dominio
+ * (SESSION_NOT_FOUND, WEBHOOK_NOT_FOUND, GROUP_NOT_FOUND, ...) carregam codigo
+ * proprio e nunca caem aqui — e 404 sem corpo JSON nao e o daemon local.
+ */
+function isRouteMissingOnDaemon(response: Response, body: ApiErrorBody | null): boolean {
+  return response.status === 404 && body?.error.code === "NOT_FOUND";
+}
+
 async function parseError(response: Response): Promise<never> {
   let body: ApiErrorBody | null = null;
 
@@ -94,6 +134,18 @@ async function parseError(response: Response): Promise<never> {
     body = (await response.json()) as ApiErrorBody;
   } catch {
     // ignored
+  }
+
+  if (isRouteMissingOnDaemon(response, body)) {
+    throw new AppError(
+      "DAEMON_VERSION_MISMATCH",
+      404,
+      "Comando nao existe no daemon em execucao: a CLI esta mais nova que o daemon ativo (janela de upgrade). Reinicie o daemon para carregar a versao atual (pare o processo e rode `wa daemon start`); se o daemon no disco tambem estiver velho, atualize o runtime do wa-control.",
+      {
+        url: response.url,
+        cause: "Route not found on running daemon (older daemon version)"
+      }
+    );
   }
 
   throw new AppError(
@@ -455,6 +507,9 @@ export class LocalApiClient {
           "x-media-kind": request.kind,
           "x-media-mime": request.mimeType,
           ...(request.caption ? { "x-media-caption": encodeURIComponent(request.caption) } : {}),
+          ...(request.fileName
+            ? { "x-media-file-name": encodeURIComponent(request.fileName) }
+            : {}),
           ...(request.ptt ? { "x-media-ptt": "1" } : {})
         },
         body: Buffer.from(buffer)
@@ -468,6 +523,167 @@ export class LocalApiClient {
     }
 
     return (await response.json()) as SendMediaResponse;
+  }
+
+  /**
+   * Operacoes de chat (typing/read): transmitem pela sessao, mas sem estado
+   * duravel verificavel — timeout classificado como falha (exit 1), pois
+   * reexecutar e o fluxo natural e seguro. Usam o timeout de send (15s) e nao
+   * o de leitura (1,5s), porque esperam ida e volta do socket do WhatsApp.
+   */
+  async typing(
+    sessionId: string,
+    request: TypingRequest
+  ): Promise<TypingResponse> {
+    return this.requestJson<TypingResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/typing`,
+      {
+        method: "POST",
+        body: JSON.stringify(request)
+      },
+      true,
+      this.sendTimeoutMs
+    );
+  }
+
+  async markRead(sessionId: string, request: ReadRequest): Promise<ReadResponse> {
+    return this.requestJson<ReadResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/read`,
+      {
+        method: "POST",
+        body: JSON.stringify(request)
+      },
+      true,
+      this.sendTimeoutMs
+    );
+  }
+
+  /**
+   * React/delete/poll: mutacoes com resposta nao-garantida. Depois de o
+   * daemon aceitar a conexao, timeout sai como SEND_RESULT_UNCERTAIN (exit 2)
+   * — a operacao PODE ter surtido efeito; conferir antes de repetir.
+   */
+  async react(sessionId: string, request: ReactRequest): Promise<ReactResponse> {
+    const opUrl = `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/react`;
+    return this.requestJson<ReactResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/react`,
+      {
+        method: "POST",
+        body: JSON.stringify(request)
+      },
+      true,
+      this.sendTimeoutMs,
+      uncertainOutcomeFor(opUrl, `a resposta da reacao em ${request.messageId} nao chegou em tempo e a reacao PODE ter sido aplicada`)
+    );
+  }
+
+  async deleteMessage(
+    sessionId: string,
+    request: DeleteMessageRequest
+  ): Promise<DeleteMessageResponse> {
+    const opUrl = `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/delete`;
+    return this.requestJson<DeleteMessageResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/delete`,
+      {
+        method: "POST",
+        body: JSON.stringify(request)
+      },
+      true,
+      this.sendTimeoutMs,
+      uncertainOutcomeFor(opUrl, `a resposta do delete de ${request.messageId} nao chegou em tempo e a mensagem PODE ter sido apagada`)
+    );
+  }
+
+  async sendPoll(sessionId: string, request: PollRequest): Promise<PollResponse> {
+    const opUrl = `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/poll`;
+    return this.requestJson<PollResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/poll`,
+      {
+        method: "POST",
+        body: JSON.stringify(request)
+      },
+      true,
+      this.sendTimeoutMs,
+      uncertainOutcomeFor(opUrl, `a resposta do envio da enquete nao chegou em tempo e a enquete PODE ter sido enviada. Confira o historico com \`wa messages ${sessionId} ${request.chat}\` antes de reenviar para nao duplicar`)
+    );
+  }
+
+  /**
+   * Operacoes de grupo (create/add/remove/promote/demote/leave): mutacoes nao
+   * idempotentes sobre a sessao. Depois de o daemon aceitar a conexao, timeout
+   * sai como SEND_RESULT_UNCERTAIN (exit 2) — o grupo PODE ter sido criado, a
+   * atualizacao PODE ter sido aplicada, o bot PODE ter saido; conferir com
+   * `wa group info` antes de repetir para nao duplicar. `info` e leitura
+   * idempotente: timeout classificado como falha (exit 1).
+   */
+  async createGroup(
+    sessionId: string,
+    request: GroupCreateRequest
+  ): Promise<GroupCreateResponse> {
+    const opUrl = `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/groups`;
+    return this.requestJson<GroupCreateResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/groups`,
+      {
+        method: "POST",
+        body: JSON.stringify(request)
+      },
+      true,
+      this.sendTimeoutMs,
+      uncertainOutcomeFor(
+        opUrl,
+        "a resposta da criacao do grupo nao chegou em tempo e o grupo PODE ter sido criado. Confira com `wa group info` ou `wa chats` antes de recriar para nao duplicar"
+      )
+    );
+  }
+
+  async groupInfo(sessionId: string, groupJid: string): Promise<GroupInfoResponse> {
+    return this.requestJson<GroupInfoResponse>(
+      `/sessions/${encodeURIComponent(sessionId)}/groups/${encodeURIComponent(groupJid)}`,
+      { headers: this.buildHeaders() },
+      false,
+      this.sendTimeoutMs
+    );
+  }
+
+  async updateGroupParticipants(
+    sessionId: string,
+    request: GroupParticipantsRequest
+  ): Promise<GroupParticipantsResponse> {
+    const path = `sessions/${encodeURIComponent(sessionId)}/groups/${encodeURIComponent(
+      request.groupJid
+    )}/participants`;
+    return this.requestJson<GroupParticipantsResponse>(
+      `/${path}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          action: request.action,
+          participants: request.participants
+        })
+      },
+      true,
+      this.sendTimeoutMs,
+      uncertainOutcomeFor(
+        `${this.baseUrl}/${path}`,
+        `a resposta da atualizacao (${request.action}) nao chegou em tempo e ela PODE ter sido aplicada. Confira com \`wa group info ${request.groupJid}\` antes de repetir`
+      )
+    );
+  }
+
+  async leaveGroup(sessionId: string, groupJid: string): Promise<GroupLeaveResponse> {
+    const path = `sessions/${encodeURIComponent(sessionId)}/groups/${encodeURIComponent(
+      groupJid
+    )}/leave`;
+    return this.requestJson<GroupLeaveResponse>(
+      `/${path}`,
+      { method: "POST" },
+      true,
+      this.sendTimeoutMs,
+      uncertainOutcomeFor(
+        `${this.baseUrl}/${path}`,
+        "a resposta da saida nao chegou em tempo e o bot PODE ter saido do grupo. Confira com `wa chats` antes de repetir"
+      )
+    );
   }
 
   async stream(sessionId: string | null, all: boolean, raw = false): Promise<Response> {

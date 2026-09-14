@@ -423,6 +423,98 @@ describe("isConnectionRefusal", () => {
 	});
 });
 
+/**
+ * Forma EXATA do fallback de rota ausente do daemon (localApi.ts): e a
+ * resposta que um daemon velho (ex.: 0.6.1) devolve quando a CLI nova chama
+ * uma rota aditiva que ele ainda nao conhece.
+ */
+function startRouteMissDaemon(body: "route-miss" | "session-not-found" | "plain-text" = "route-miss") {
+	const server = Bun.serve({
+		port: 0,
+		async fetch() {
+			if (body === "route-miss") {
+				return Response.json(
+					{ error: { code: "NOT_FOUND", message: "Rota nao encontrada." } },
+					{ status: 404 }
+				);
+			}
+
+			if (body === "session-not-found") {
+				return Response.json(
+					{
+						error: {
+							code: "SESSION_NOT_FOUND",
+							message: "Sessao 'principal' nao encontrada."
+						}
+					},
+					{ status: 404 }
+				);
+			}
+
+			return new Response("not found", { status: 404 });
+		}
+	});
+
+	openServers.push(server);
+	return server;
+}
+
+describe("LocalApiClient — janela de upgrade (CLI nova contra daemon velho)", () => {
+	it("comando novo (poll) contra daemon velho vira DAEMON_VERSION_MISMATCH explicito orientando reiniciar, nunca 404 cru", async () => {
+		const daemon = startRouteMissDaemon();
+		const client = makeClient(daemon.port!!);
+
+		const error = await captureError(() =>
+			client.sendPoll("principal", {
+				chat: "556799999999@s.whatsapp.net",
+				question: "smoke?",
+				options: ["sim", "nao"]
+			})
+		);
+
+		expect(error.code).toBe("DAEMON_VERSION_MISMATCH");
+		expect(error.status).toBe(404);
+		expect(error.message).toContain("Reinicie o daemon");
+		expect(error.message).toContain("wa daemon start");
+		expect(error.message).not.toContain("Rota nao encontrada.");
+		expect(exitCodeForError(error)).toBe(1);
+	});
+
+	it("rota aditiva de leitura (group info) recebe o mesmo mapeamento de versao", async () => {
+		const daemon = startRouteMissDaemon();
+		const client = makeClient(daemon.port!!);
+
+		const error = await captureError(() =>
+			client.groupInfo("principal", "120363999999999999@g.us")
+		);
+
+		expect(error.code).toBe("DAEMON_VERSION_MISMATCH");
+		expect(error.message).toContain("Reinicie o daemon");
+	});
+
+	it("404 de dominio (SESSION_NOT_FOUND) nao e confundido com rota ausente na janela de upgrade", async () => {
+		const daemon = startRouteMissDaemon("session-not-found");
+		const client = makeClient(daemon.port!!);
+
+		const error = await captureError(() =>
+			client.send("principal", { to: "556799999999", text: "ola" })
+		);
+
+		expect(error.code).toBe("SESSION_NOT_FOUND");
+		expect(error.message).toContain("Sessao 'principal' nao encontrada.");
+	});
+
+	it("404 sem JSON (nao e o daemon local) mantem o erro generico, sem alegar versao", async () => {
+		const daemon = startRouteMissDaemon("plain-text");
+		const client = makeClient(daemon.port!!);
+
+		const error = await captureError(() => client.status());
+
+		expect(error.code).toBe("HTTP_ERROR");
+		expect(error.message).not.toContain("Reinicie o daemon");
+	});
+});
+
 describe("exitCodeForError", () => {
 	it("mapeia resultado incerto para 2 e todo o resto para 1", () => {
 		expect(exitCodeForError(new AppError("SEND_RESULT_UNCERTAIN", 504, "x"))).toBe(2);

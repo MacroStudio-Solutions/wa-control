@@ -17,19 +17,19 @@ import {
 } from "./mediaTypes.ts";
 
 describe("tabela de tipos suportados", () => {
-  it("libera image e audio", () => {
+  it("libera image, audio, video e document", () => {
     expect(isMediaKindSupported("image")).toBe(true);
     expect(isMediaKindSupported("audio")).toBe(true);
+    expect(isMediaKindSupported("video")).toBe(true);
+    expect(isMediaKindSupported("document")).toBe(true);
   });
 
-  it("nao libera video, document e sticker", () => {
-    expect(isMediaKindSupported("video")).toBe(false);
-    expect(isMediaKindSupported("document")).toBe(false);
+  it("nao libera sticker", () => {
     expect(isMediaKindSupported("sticker")).toBe(false);
   });
 
   it("lista os tipos liberados na ordem do catalogo", () => {
-    expect(listSupportedMediaKinds()).toEqual(["image", "audio"]);
+    expect(listSupportedMediaKinds()).toEqual(["image", "audio", "video", "document"]);
   });
 
   it("cobre todos os tipos do catalogo na tabela", () => {
@@ -43,10 +43,12 @@ describe("assertMediaKindSupported", () => {
   it("passa para os tipos liberados", () => {
     expect(() => assertMediaKindSupported("image")).not.toThrow();
     expect(() => assertMediaKindSupported("audio")).not.toThrow();
+    expect(() => assertMediaKindSupported("video")).not.toThrow();
+    expect(() => assertMediaKindSupported("document")).not.toThrow();
   });
 
   it("rejeita os tipos ainda nao liberados com MEDIA_TYPE_NOT_SUPPORTED_YET", () => {
-    const blocked: MediaKind[] = ["video", "document", "sticker"];
+    const blocked: MediaKind[] = ["sticker"];
 
     for (const kind of blocked) {
       try {
@@ -59,7 +61,7 @@ describe("assertMediaKindSupported", () => {
         }
         expect(error.code).toBe("MEDIA_TYPE_NOT_SUPPORTED_YET");
         expect(error.message).toContain(kind);
-        expect(error.message).toContain("image, audio");
+        expect(error.message).toContain("image, audio, video, document");
       }
     }
   });
@@ -97,7 +99,7 @@ describe("erros de midia", () => {
 
   it("todos os codigos de midia usam exit 1, preservando o 2 so para send incerto", () => {
     const errors = [
-      mediaTypeNotSupportedYetError("video"),
+      mediaTypeNotSupportedYetError("sticker"),
       messageNotFoundError("chat", "id"),
       notMediaError(null),
       mediaPayloadUnavailableError("x"),

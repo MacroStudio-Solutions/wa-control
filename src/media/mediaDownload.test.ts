@@ -146,14 +146,45 @@ describe("downloadIncomingMedia", () => {
     }
   });
 
-  it("tipo nao liberado (video) vira MEDIA_TYPE_NOT_SUPPORTED_YET antes do fetch", async () => {
+  it("baixa video preservando o MIME declarado para a extensao de download", async () => {
     const raw = makeRawMessage({
-      videoMessage: { mimetype: "video/mp4" }
+      videoMessage: { mimetype: "video/mp4", fileLength: 7 }
+    });
+
+    const result = await downloadIncomingMedia({
+      record: makeRecord({ messageType: "video", rawMessageType: "videoMessage" }),
+      raw,
+      fetchMedia: async () => new Uint8Array([1, 2, 3, 4, 5, 6, 7])
+    });
+
+    expect(result.kind).toBe("video");
+    expect(result.mimeType).toBe("video/mp4");
+    expect(result.size).toBe(7);
+  });
+
+  it("video sem mimetype cai no MIME padrao do tipo (video/mp4)", async () => {
+    const raw = makeRawMessage({
+      videoMessage: { fileLength: 2 }
+    });
+
+    const result = await downloadIncomingMedia({
+      record: makeRecord({ messageType: "video", rawMessageType: "videoMessage" }),
+      raw,
+      fetchMedia: async () => new Uint8Array([1, 2])
+    });
+
+    expect(result.kind).toBe("video");
+    expect(result.mimeType).toBe("video/mp4");
+  });
+
+  it("tipo nao liberado (sticker) vira MEDIA_TYPE_NOT_SUPPORTED_YET antes do fetch", async () => {
+    const raw = makeRawMessage({
+      stickerMessage: { mimetype: "image/webp" }
     });
 
     const error = await captureError(() =>
       downloadIncomingMedia({
-        record: makeRecord({ messageType: "video", rawMessageType: "videoMessage" }),
+        record: makeRecord({ messageType: "sticker", rawMessageType: "stickerMessage" }),
         raw,
         fetchMedia: async () => {
           throw new Error("nao deveria buscar");
@@ -164,6 +195,7 @@ describe("downloadIncomingMedia", () => {
     expect(isAppError(error)).toBe(true);
     if (isAppError(error)) {
       expect(error.code).toBe("MEDIA_TYPE_NOT_SUPPORTED_YET");
+      expect(error.message).toContain("image, audio, video, document");
     }
   });
 

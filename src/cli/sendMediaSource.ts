@@ -1,4 +1,5 @@
 import { accessSync, existsSync, statSync, constants as fsConstants } from "node:fs";
+import { basename } from "node:path";
 import { AppError } from "../shared/errors.ts";
 import { mediaDescriptorFromFile, mimeForMediaKind } from "../media/mediaInference.ts";
 import {
@@ -10,19 +11,22 @@ import {
 export interface SendMediaSource {
   kind: MediaKind;
   mimeType: string;
+  fileName: string;
   buffer: Uint8Array;
 }
 
 export interface SendMediaSourceOptions {
   typeOverride?: MediaKind;
   caption?: string;
+  fileName?: string;
   ptt?: boolean;
 }
 
 /**
  * Classificacao de erros ANTES de qualquer rede: arquivo existe, e legivel, o
- * tipo foi inferido (ou veio por --type) e esta liberado, e caption/ptt so
- * acompanham o tipo que os aceita. O daemon so ve a requisicao quando tudo
+ * tipo foi inferido (ou veio por --type) e esta liberado, e caption/filename/
+ * ptt so acompanham o tipo que os aceita. O nome do documento e inferido do
+ * arquivo e --filename sobrepoe. O daemon so ve a requisicao quando tudo
  * confere — falha aqui e exit 1 sem transmissao.
  */
 export function resolveSendMediaSource(
@@ -46,6 +50,7 @@ export function resolveSendMediaSource(
   return {
     kind: descriptor.kind,
     mimeType: descriptor.mimeType ?? mimeForMediaKind(descriptor.kind),
+    fileName: options.fileName ?? basename(filePath),
     buffer: descriptor.payload.buffer
   };
 }
@@ -68,13 +73,21 @@ function assertFileReadable(filePath: string): void {
 
 export function assertSendMediaFlags(
   kind: MediaKind,
-  options: { caption?: string; ptt?: boolean }
+  options: { caption?: string; fileName?: string; ptt?: boolean }
 ): void {
-  if (options.caption && kind !== "image") {
+  if (options.caption && kind !== "image" && kind !== "video") {
     throw new AppError(
       "INVALID_FLAG",
       400,
-      `--caption so e suportada para imagem; '${kind}' nao leva legenda.`
+      `--caption so e suportada para imagem e video; '${kind}' nao leva legenda.`
+    );
+  }
+
+  if (options.fileName && kind !== "document") {
+    throw new AppError(
+      "INVALID_FLAG",
+      400,
+      `--filename so e suportado para documento; '${kind}' nao carrega nome de arquivo.`
     );
   }
 

@@ -6,6 +6,7 @@ export interface ParsedSendMediaRequest {
   kind: MediaKind;
   mimeType: string;
   caption?: string;
+  fileName?: string;
   ptt?: boolean;
 }
 
@@ -39,12 +40,14 @@ export function parseSendMediaRequest(request: Request): ParsedSendMediaRequest 
   }
 
   const captionRaw = header("x-media-caption");
+  const fileNameRaw = header("x-media-file-name");
 
   return {
     to,
     kind: kindRaw,
     mimeType,
     ...(captionRaw ? { caption: decodeURIComponent(captionRaw) } : {}),
+    ...(fileNameRaw ? { fileName: decodeURIComponent(fileNameRaw) } : {}),
     ...(header("x-media-ptt") === "1" ? { ptt: true } : {})
   };
 }

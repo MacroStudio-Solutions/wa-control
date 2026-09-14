@@ -17,6 +17,7 @@ import {
 } from "../baileys/lidDirectory.ts";
 import { normalizeIncomingMessage } from "../baileys/normalizeMessage.ts";
 import { buildMediaMessageContent } from "../media/mediaContent.ts";
+import { messageNotFoundError } from "../media/mediaTypes.ts";
 import type { MediaDescriptor } from "../media/mediaTypes.ts";
 import { ReadModelStore } from "../read-model/store.ts";
 import { renderQrTerminal } from "../baileys/qr.ts";
@@ -25,15 +26,43 @@ import { AppError } from "../shared/errors.ts";
 import type { Logger } from "../shared/logger.ts";
 import type {
   AppConfig,
+  DeleteMessageResponse,
+  GroupCreateResponse,
+  GroupInfoResponse,
+  GroupLeaveResponse,
+  GroupParticipantAction,
+  GroupParticipantsResponse,
+  PollResponse,
+  ReactResponse,
+  ReadResponse,
   SendMediaRequest,
   SendMediaResponse,
   SendMessageResponse,
   SessionRecord,
-  SessionStatus
+  SessionStatus,
+  TypingResponse
 } from "../shared/types.ts";
 import { nowIso, nowUnix } from "../shared/utils.ts";
 import { SessionsRepo } from "../storage/sessionsRepo.ts";
+import {
+  assertPollOptions,
+  buildMessageKeyFromRecord,
+  mapChatOpError
+} from "./chatOps.ts";
+import {
+  assertGroupJid,
+  assertGroupSubject,
+  mapGroupOpError,
+  normalizeParticipantInputs,
+  participantRejectionMessage,
+  serializeGroupSnapshot,
+  summarizeParticipantUpdate,
+  toBaileysParticipantAction
+} from "./groupOps.ts";
 import { EventPublisher } from "./eventPublisher.ts";
+
+const CHAT_WITHOUT_LOCAL_HISTORY_NOTE =
+  "Aviso: o chat nao tem conversa projetada localmente; o WhatsApp pode descartar o indicador em silencio.";
 
 interface ConnectResult {
   session: SessionRecord;
@@ -264,8 +293,9 @@ export class ManagedSession {
   /**
    * Envio de midia: reusa o caminho do send-texto (mesma checagem de sessao,
    * mesma resolucao de JID, mesmo evento `message.sent`) e monta o conteudo do
-   * Baileys pelo pipeline de midia — caption so em imagem, --ptt decide voice
-   * note, tipo fora da tabela e recusado antes de qualquer transmissao.
+   * Baileys pelo pipeline de midia — caption em imagem e video, fileName no
+   * documento, --ptt decide voice note, tipo fora da tabela e recusado antes
+   * de qualquer transmissao.
    */
   async sendMediaMessage(media: SendMediaRequest, buffer: Uint8Array): Promise<SendMediaResponse> {
     if (!this.socket || this.session.status !== "connected") {
@@ -284,6 +314,7 @@ export class ManagedSession {
     };
     const content = buildMediaMessageContent(descriptor, {
       ...(media.caption ? { caption: media.caption } : {}),
+      ...(media.fileName ? { fileName: media.fileName } : {}),
       ...(media.ptt ? { ptt: true } : {})
     });
 
@@ -297,6 +328,7 @@ export class ManagedSession {
         kind: media.kind,
         mimeType: media.mimeType,
         caption: media.caption ?? null,
+        fileName: media.fileName ?? null,
         ptt: media.ptt === true,
         size: buffer.byteLength,
         messageId: sent?.key.id ?? null,
@@ -310,6 +342,7 @@ export class ManagedSession {
         kind: media.kind,
         mimeType: media.mimeType,
         ...(media.caption ? { text: media.caption } : {}),
+        ...(media.fileName ? { fileName: media.fileName } : {}),
         ptt: response.ptt
       });
       this.readModel.recordSentMediaMessage(
@@ -334,6 +367,362 @@ export class ManagedSession {
         502,
         `Falha ao enviar midia: ${errorMessage(error)}`
       );
+    }
+  }
+
+  /**
+   * Indicador de digitacao (composing) ou gravacao de audio (recording),
+   * one-shot: o WhatsApp nao confirma presenca, entao a honestidade vem da
+   * resolucao do destino (numero inexistente falha aqui) e do aviso explicito
+   * quando o chat nao tem conversa projetada localmente.
+   */
+  async sendTypingIndicator(chat: string, recording: boolean): Promise<TypingResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    const jid = await this.resolveRecipientJid(chat);
+
+    try {
+      await this.socket.sendPresenceUpdate(recording ? "recording" : "composing", jid);
+    } catch (error) {
+      throw mapChatOpError("typing", error, { chat, jid, recording });
+    }
+
+    const hasLocalHistory = this.readModel.listMessages(this.session.id, chat, 1).length > 0;
+
+    return {
+      ok: true,
+      sessionId: this.session.id,
+      chat,
+      jid,
+      recording,
+      ...(hasLocalHistory ? {} : { note: CHAT_WITHOUT_LOCAL_HISTORY_NOTE })
+    };
+  }
+
+  /**
+   * Marcar como lida: sem messageId usa a mensagem mais recente projetada do
+   * chat (se nenhuma existe, erro explicito — nunca sucesso mentiroso); com
+   * messageId, a chave vem do registro local (fromMe/participant corretos).
+   */
+  async markMessagesRead(chat: string, messageId?: string): Promise<ReadResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    const jid = await this.resolveRecipientJid(chat);
+    const sessionId = this.session.id;
+
+    let resolvedId: string;
+    let key;
+    if (messageId) {
+      const record = this.readModel.findMessage(sessionId, chat, messageId);
+      if (!record) {
+        throw messageNotFoundError(chat, messageId);
+      }
+      key = buildMessageKeyFromRecord(record);
+      resolvedId = record.id;
+    } else {
+      const latest = this.readModel.listMessages(sessionId, chat, 1)[0];
+      if (!latest) {
+        throw new AppError(
+          "READ_NO_RECENT_MESSAGE",
+          404,
+          `Nenhuma mensagem recente no chat '${chat}' para marcar como lida.`
+        );
+      }
+      key = buildMessageKeyFromRecord(latest);
+      resolvedId = latest.id;
+    }
+
+    try {
+      await this.socket.readMessages([key]);
+    } catch (error) {
+      throw mapChatOpError("read", error, { chat, jid, messageId: resolvedId });
+    }
+
+    return {
+      ok: true,
+      sessionId,
+      chat,
+      jid,
+      messageIds: [resolvedId]
+    };
+  }
+
+  /**
+   * Reacao a mensagem: a chave vem do registro projetado (mesma referencia que
+   * `messages` e o webhook entregam). Emoji vazio remove a reacao — contrato
+   * da Baileys, documentado no help da CLI.
+   */
+  async reactToMessage(chat: string, messageId: string, emoji: string): Promise<ReactResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    await this.resolveRecipientJid(chat);
+    const record = this.readModel.findMessage(this.session.id, chat, messageId);
+    if (!record) {
+      throw messageNotFoundError(chat, messageId);
+    }
+
+    try {
+      await this.socket.sendMessage(record.chatJid, {
+        react: { key: buildMessageKeyFromRecord(record), text: emoji }
+      });
+    } catch (error) {
+      throw mapChatOpError("react", error, { chat, messageId, emoji });
+    }
+
+    return {
+      ok: true,
+      sessionId: this.session.id,
+      chat,
+      jid: record.chatJid,
+      messageId,
+      emoji,
+      removed: emoji === ""
+    };
+  }
+
+  /**
+   * Apagar mensagem: `{ delete }` da Baileys — revoke para todos quando
+   * propria, delete para o eu mesmo em mensagem de terceiro (admin no grupo).
+   * Recusa do WhatsApp propaga como erro classificado, nunca como sucesso.
+   */
+  async deleteMessage(chat: string, messageId: string): Promise<DeleteMessageResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    await this.resolveRecipientJid(chat);
+    const record = this.readModel.findMessage(this.session.id, chat, messageId);
+    if (!record) {
+      throw messageNotFoundError(chat, messageId);
+    }
+
+    try {
+      await this.socket.sendMessage(record.chatJid, {
+        delete: buildMessageKeyFromRecord(record)
+      });
+    } catch (error) {
+      throw mapChatOpError("delete", error, { chat, messageId });
+    }
+
+    return {
+      ok: true,
+      sessionId: this.session.id,
+      chat,
+      jid: record.chatJid,
+      messageId,
+      fromMe: record.fromMe
+    };
+  }
+
+  /**
+   * Enquete (envio apenas — leitura de votos fora de escopo): opcoes
+   * validadas localmente ANTES de qualquer rede; selectableCount fica
+   * indefinido e a Baileys aplica 0 (escolha unica).
+   */
+  async sendPollMessage(chat: string, question: string, options: string[]): Promise<PollResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    assertPollOptions(options);
+    const jid = await this.resolveRecipientJid(chat);
+    const timestamp = nowUnix();
+
+    try {
+      const sent = await this.socket.sendMessage(jid, {
+        poll: { name: question, values: options }
+      });
+      const messageId = sent?.key.id ?? null;
+
+      this.publisher.create("message.sent", this.session.id, {
+        messageId,
+        chatId: jid,
+        to: jid,
+        kind: "poll",
+        text: question
+      });
+      this.readModel.recordSentMediaMessage(
+        this.session.id,
+        jid,
+        "poll",
+        question,
+        messageId,
+        timestamp
+      );
+
+      return {
+        ok: true,
+        sessionId: this.session.id,
+        chat,
+        jid,
+        question,
+        options,
+        messageId,
+        timestamp
+      };
+    } catch (error) {
+      this.publisher.create("message.error", this.session.id, {
+        to: chat,
+        kind: "poll",
+        error: errorMessage(error)
+      });
+
+      throw mapChatOpError("poll", error, { chat, jid });
+    }
+  }
+
+  /**
+   * Criar grupo: assunto validado e participantes normalizados localmente
+   * ANTES do socket; o criador entra como dono e superadmin automaticamente.
+   */
+  async createGroup(subject: string, participants: string[]): Promise<GroupCreateResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    assertGroupSubject(subject);
+    const jids = normalizeParticipantInputs(participants);
+
+    try {
+      const metadata = await this.socket.groupCreate(subject.trim(), jids);
+      return serializeGroupSnapshot(this.session.id, metadata);
+    } catch (error) {
+      throw mapGroupOpError("create", error, { subject });
+    }
+  }
+
+  /**
+   * Metadados completos de um grupo (leitura via socket): JID invalido falha
+   * localmente; grupo inexistente ou sessao fora do grupo falha com classe
+   * mapeada (GROUP_NOT_FOUND / GROUP_NOT_ALLOWED), nunca silencio.
+   */
+  async groupInfo(groupJid: string): Promise<GroupInfoResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    assertGroupJid(groupJid);
+
+    try {
+      const metadata = await this.socket.groupMetadata(groupJid);
+      return serializeGroupSnapshot(this.session.id, metadata);
+    } catch (error) {
+      throw mapGroupOpError("info", error, { groupJid });
+    }
+  }
+
+  /**
+   * add/remove/promote/demote: o WhatsApp responde por participante; sucesso
+   * so quando TODOS entram com status 200. Recusa de qualquer participante
+   * sai como GROUP_PARTICIPANT_REJECTED com o motivo acionavel de cada um.
+   */
+  async updateGroupParticipants(
+    groupJid: string,
+    action: GroupParticipantAction,
+    participants: string[]
+  ): Promise<GroupParticipantsResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    assertGroupJid(groupJid);
+    const jids = normalizeParticipantInputs(participants);
+
+    try {
+      const results = await this.socket.groupParticipantsUpdate(
+        groupJid,
+        jids,
+        toBaileysParticipantAction(action)
+      );
+      const { updated, failures } = summarizeParticipantUpdate(action, results);
+
+      if (failures.length > 0) {
+        throw new AppError("GROUP_PARTICIPANT_REJECTED", 502, participantRejectionMessage(action, failures), {
+          action,
+          groupJid,
+          failures
+        });
+      }
+
+      return {
+        ok: true,
+        sessionId: this.session.id,
+        jid: groupJid,
+        action,
+        updated
+      };
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw mapGroupOpError(action, error, { groupJid });
+    }
+  }
+
+  /**
+   * Sair do grupo: irreversivel do lado do bot (re-entrada exige convite de
+   * admin), entao o JID e validado localmente e a recusa do WhatsApp propaga
+   * classificada.
+   */
+  async leaveGroup(groupJid: string): Promise<GroupLeaveResponse> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    assertGroupJid(groupJid);
+
+    try {
+      await this.socket.groupLeave(groupJid);
+      return {
+        ok: true,
+        sessionId: this.session.id,
+        jid: groupJid
+      };
+    } catch (error) {
+      throw mapGroupOpError("leave", error, { groupJid });
     }
   }
 

@@ -13,12 +13,21 @@ import { resolveSendMediaSource } from "./cli/sendMediaSource.ts";
 import {
   renderChats,
   renderContacts,
+  renderDelete,
   renderEventCatalog,
+  renderGroupCreate,
+  renderGroupInfo,
+  renderGroupLeave,
+  renderGroupParticipants,
   renderHelp,
   renderMessages,
   renderOfflineStatus,
+  renderPoll,
+  renderReact,
+  renderRead,
   renderSessions,
   renderStatus,
+  renderTyping,
   renderWebhookDeliveries,
   renderWebhooks
 } from "./cli/render.ts";
@@ -164,11 +173,12 @@ async function run(): Promise<void> {
     }
 
     case "send-media": {
-      // Classificacao ANTES de qualquer rede: arquivo, tipo, caption e ptt
-      // validados aqui; o daemon so ve a requisicao quando tudo confere.
+      // Classificacao ANTES de qualquer rede: arquivo, tipo, caption, filename
+      // e ptt validados aqui; o daemon so ve a requisicao quando tudo confere.
       const source = resolveSendMediaSource(command.file, {
         ...(command.type ? { typeOverride: command.type } : {}),
         ...(command.caption ? { caption: command.caption } : {}),
+        ...(command.filename ? { fileName: command.filename } : {}),
         ...(command.ptt ? { ptt: true } : {})
       });
       const result = await client.sendMedia(
@@ -178,6 +188,7 @@ async function run(): Promise<void> {
           kind: source.kind,
           mimeType: source.mimeType,
           ...(command.caption ? { caption: command.caption } : {}),
+          fileName: source.fileName,
           ...(command.ptt ? { ptt: true } : {})
         },
         source.buffer
@@ -190,8 +201,9 @@ async function run(): Promise<void> {
 
       const pttNote = result.ptt ? " (voice note)" : "";
       const captionNote = result.caption ? `, caption "${result.caption}"` : "";
+      const fileNameNote = result.fileName ? `, arquivo "${result.fileName}"` : "";
       console.log(
-        `Midia enviada para ${result.jid}: ${result.kind} (${result.mimeType})${pttNote}, ${result.size} bytes${captionNote}${result.messageId ? ` (${result.messageId})` : ""}.`
+        `Midia enviada para ${result.jid}: ${result.kind} (${result.mimeType})${pttNote}, ${result.size} bytes${captionNote}${fileNameNote}${result.messageId ? ` (${result.messageId})` : ""}.`
       );
       return;
     }
@@ -234,6 +246,138 @@ async function run(): Promise<void> {
       console.log(
         `Midia baixada: ${media.kind} (${media.mimeType}), ${media.size} bytes -> ${destination}`
       );
+      return;
+    }
+
+    case "typing": {
+      const result = await client.typing(command.sessionId, {
+        chat: command.chat,
+        ...(command.recording ? { recording: true } : {})
+      });
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderTyping(result));
+      return;
+    }
+
+    case "read": {
+      const result = await client.markRead(command.sessionId, {
+        chat: command.chat,
+        ...(command.messageId ? { messageId: command.messageId } : {})
+      });
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderRead(result));
+      return;
+    }
+
+    case "react": {
+      const result = await client.react(command.sessionId, {
+        chat: command.chat,
+        messageId: command.messageId,
+        emoji: command.emoji
+      });
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderReact(result));
+      return;
+    }
+
+    case "delete": {
+      const result = await client.deleteMessage(command.sessionId, {
+        chat: command.chat,
+        messageId: command.messageId
+      });
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderDelete(result));
+      return;
+    }
+
+    case "poll": {
+      const result = await client.sendPoll(command.sessionId, {
+        chat: command.chat,
+        question: command.question,
+        options: command.options
+      });
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderPoll(result));
+      return;
+    }
+
+    case "group.create": {
+      const result = await client.createGroup(command.sessionId, {
+        subject: command.subject,
+        ...(command.participants.length > 0 ? { participants: command.participants } : {})
+      });
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderGroupCreate(result));
+      return;
+    }
+
+    case "group.info": {
+      const result = await client.groupInfo(command.sessionId, command.groupJid);
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderGroupInfo(result));
+      return;
+    }
+
+    case "group.participants": {
+      const result = await client.updateGroupParticipants(command.sessionId, {
+        groupJid: command.groupJid,
+        action: command.action,
+        participants: command.participants
+      });
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderGroupParticipants(result));
+      return;
+    }
+
+    case "group.leave": {
+      const result = await client.leaveGroup(command.sessionId, command.groupJid);
+
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(renderGroupLeave(result));
       return;
     }
 

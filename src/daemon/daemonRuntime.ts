@@ -10,10 +10,20 @@ import type {
   ContactRecord,
   CreateWebhookRequest,
   DaemonRuntimeInfo,
+  DeleteMessageResponse,
+  GroupCreateResponse,
+  GroupInfoResponse,
+  GroupLeaveResponse,
+  GroupParticipantAction,
+  GroupParticipantsResponse,
   MessageRecord,
+  PollResponse,
+  ReactResponse,
+  ReadResponse,
   SendMediaRequest,
   SendMediaResponse,
   StatusResponse,
+  TypingResponse,
   WebhookRecord
 } from "../shared/types.ts";
 import {
@@ -180,6 +190,73 @@ export class DaemonRuntime {
     buffer: Uint8Array
   ): Promise<SendMediaResponse> {
     return this.sessions.sendMediaMessage(sessionId, media, buffer);
+  }
+
+  typingIndicator(
+    sessionId: string,
+    chat: string,
+    recording: boolean
+  ): Promise<TypingResponse> {
+    return this.sessions.sendTypingIndicator(sessionId, chat, recording);
+  }
+
+  markMessagesRead(
+    sessionId: string,
+    chat: string,
+    messageId?: string
+  ): Promise<ReadResponse> {
+    return this.sessions.markMessagesRead(sessionId, chat, messageId);
+  }
+
+  reactToMessage(
+    sessionId: string,
+    chat: string,
+    messageId: string,
+    emoji: string
+  ): Promise<ReactResponse> {
+    return this.sessions.reactToMessage(sessionId, chat, messageId, emoji);
+  }
+
+  deleteMessage(
+    sessionId: string,
+    chat: string,
+    messageId: string
+  ): Promise<DeleteMessageResponse> {
+    return this.sessions.deleteMessage(sessionId, chat, messageId);
+  }
+
+  sendPoll(
+    sessionId: string,
+    chat: string,
+    question: string,
+    options: string[]
+  ): Promise<PollResponse> {
+    return this.sessions.sendPollMessage(sessionId, chat, question, options);
+  }
+
+  createGroup(
+    sessionId: string,
+    subject: string,
+    participants: string[]
+  ): Promise<GroupCreateResponse> {
+    return this.sessions.createGroup(sessionId, subject, participants);
+  }
+
+  groupInfo(sessionId: string, groupJid: string): Promise<GroupInfoResponse> {
+    return this.sessions.groupInfo(sessionId, groupJid);
+  }
+
+  updateGroupParticipants(
+    sessionId: string,
+    groupJid: string,
+    action: GroupParticipantAction,
+    participants: string[]
+  ): Promise<GroupParticipantsResponse> {
+    return this.sessions.updateGroupParticipants(sessionId, groupJid, action, participants);
+  }
+
+  leaveGroup(sessionId: string, groupJid: string): Promise<GroupLeaveResponse> {
+    return this.sessions.leaveGroup(sessionId, groupJid);
   }
 
   /**

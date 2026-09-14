@@ -139,6 +139,13 @@ describe("destinationPathFor", () => {
       join(dir, "3EB0MEDIA.ogg")
     );
   });
+
+  it("video mp4 vira extensao .mp4", () => {
+    const dir = tempDir();
+    const target = { directory: dir, fileName: null };
+
+    expect(destinationPathFor(target, "video/mp4", "3EB0MEDIA")).toBe(join(dir, "3EB0MEDIA.mp4"));
+  });
 });
 
 describe("sanitizeMessageIdForFile", () => {

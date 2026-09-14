@@ -4,11 +4,21 @@ import { AppError } from "../shared/errors.ts";
 import type { Logger } from "../shared/logger.ts";
 import type {
   AppConfig,
+  DeleteMessageResponse,
+  GroupCreateResponse,
+  GroupInfoResponse,
+  GroupLeaveResponse,
+  GroupParticipantAction,
+  GroupParticipantsResponse,
+  PollResponse,
+  ReactResponse,
+  ReadResponse,
   SendMediaRequest,
   SendMediaResponse,
   SendMessageResponse,
   SessionQrResponse,
-  SessionRecord
+  SessionRecord,
+  TypingResponse
 } from "../shared/types.ts";
 import { dataUrlToBase64, renderQrDataUrl, renderQrTerminal } from "../baileys/qr.ts";
 import { nowIso } from "../shared/utils.ts";
@@ -130,6 +140,82 @@ export class SessionManager {
   ): Promise<SendMediaResponse> {
     const controller = this.getExistingController(sessionId);
     return controller.sendMediaMessage(media, buffer);
+  }
+
+  async sendTypingIndicator(
+    sessionId: string,
+    chat: string,
+    recording: boolean
+  ): Promise<TypingResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.sendTypingIndicator(chat, recording);
+  }
+
+  async markMessagesRead(
+    sessionId: string,
+    chat: string,
+    messageId?: string
+  ): Promise<ReadResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.markMessagesRead(chat, messageId);
+  }
+
+  async reactToMessage(
+    sessionId: string,
+    chat: string,
+    messageId: string,
+    emoji: string
+  ): Promise<ReactResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.reactToMessage(chat, messageId, emoji);
+  }
+
+  async deleteMessage(
+    sessionId: string,
+    chat: string,
+    messageId: string
+  ): Promise<DeleteMessageResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.deleteMessage(chat, messageId);
+  }
+
+  async sendPollMessage(
+    sessionId: string,
+    chat: string,
+    question: string,
+    options: string[]
+  ): Promise<PollResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.sendPollMessage(chat, question, options);
+  }
+
+  async createGroup(
+    sessionId: string,
+    subject: string,
+    participants: string[]
+  ): Promise<GroupCreateResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.createGroup(subject, participants);
+  }
+
+  async groupInfo(sessionId: string, groupJid: string): Promise<GroupInfoResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.groupInfo(groupJid);
+  }
+
+  async updateGroupParticipants(
+    sessionId: string,
+    groupJid: string,
+    action: GroupParticipantAction,
+    participants: string[]
+  ): Promise<GroupParticipantsResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.updateGroupParticipants(groupJid, action, participants);
+  }
+
+  async leaveGroup(sessionId: string, groupJid: string): Promise<GroupLeaveResponse> {
+    const controller = this.getExistingController(sessionId);
+    return controller.leaveGroup(groupJid);
   }
 
   private getOrCreateController(sessionId: string): ManagedSession {

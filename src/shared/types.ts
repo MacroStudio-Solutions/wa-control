@@ -88,6 +88,7 @@ export interface SendMediaRequest {
   kind: MediaKind;
   mimeType: string;
   caption?: string;
+  fileName?: string;
   ptt?: boolean;
 }
 
@@ -99,6 +100,7 @@ export interface SendMediaResponse {
   kind: MediaKind;
   mimeType: string;
   caption: string | null;
+  fileName: string | null;
   ptt: boolean;
   size: number;
   messageId: string | null;
@@ -113,6 +115,136 @@ export interface DownloadMediaResponse {
   chatJid: string;
   messageId: string;
   buffer: Uint8Array;
+}
+
+export interface TypingRequest {
+  chat: string;
+  recording?: boolean;
+}
+
+export interface TypingResponse {
+  ok: true;
+  sessionId: string;
+  chat: string;
+  jid: string;
+  recording: boolean;
+  /** Aviso explicito (ex.: chat sem conversa projetada localmente). */
+  note?: string;
+}
+
+export interface ReadRequest {
+  chat: string;
+  messageId?: string;
+}
+
+export interface ReadResponse {
+  ok: true;
+  sessionId: string;
+  chat: string;
+  jid: string;
+  messageIds: string[];
+}
+
+export interface ReactRequest {
+  chat: string;
+  messageId: string;
+  /** Emoji da reacao; string vazia remove a reacao. */
+  emoji: string;
+}
+
+export interface ReactResponse {
+  ok: true;
+  sessionId: string;
+  chat: string;
+  jid: string;
+  messageId: string;
+  emoji: string;
+  /** true quando o emoji vazio removeu a reacao. */
+  removed: boolean;
+}
+
+export interface DeleteMessageRequest {
+  chat: string;
+  messageId: string;
+}
+
+export interface DeleteMessageResponse {
+  ok: true;
+  sessionId: string;
+  chat: string;
+  jid: string;
+  messageId: string;
+  /** true quando a mensagem apagada foi propria (revoke para todos). */
+  fromMe: boolean;
+}
+
+export interface PollRequest {
+  chat: string;
+  question: string;
+  options: string[];
+}
+
+export interface PollResponse {
+  ok: true;
+  sessionId: string;
+  chat: string;
+  jid: string;
+  question: string;
+  options: string[];
+  messageId: string | null;
+  timestamp: number;
+}
+
+export type GroupParticipantAction = "add" | "remove" | "promote" | "demote";
+
+export interface GroupCreateRequest {
+  subject: string;
+  participants?: string[];
+}
+
+export interface GroupParticipantSummary {
+  jid: string;
+  lid?: string;
+  name: string | null;
+  /** true para admin e superadmin. */
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+}
+
+export interface GroupInfoResponse {
+  ok: true;
+  sessionId: string;
+  jid: string;
+  subject: string;
+  owner: string | null;
+  description: string | null;
+  /** Unix timestamp da criacao do grupo, quando o WhatsApp informa. */
+  creation: number | null;
+  size: number;
+  participants: GroupParticipantSummary[];
+}
+
+export type GroupCreateResponse = GroupInfoResponse;
+
+export interface GroupParticipantsRequest {
+  groupJid: string;
+  action: GroupParticipantAction;
+  participants: string[];
+}
+
+export interface GroupParticipantsResponse {
+  ok: true;
+  sessionId: string;
+  jid: string;
+  action: GroupParticipantAction;
+  /** JIDs efetivamente atualizados (status 200 do WhatsApp). */
+  updated: string[];
+}
+
+export interface GroupLeaveResponse {
+  ok: true;
+  sessionId: string;
+  jid: string;
 }
 
 export interface NormalizedEvent {

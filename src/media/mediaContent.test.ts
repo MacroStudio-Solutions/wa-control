@@ -132,8 +132,68 @@ describe("buildMediaMessageContent", () => {
     }
   });
 
+  it("video com caption e mimetype", () => {
+    const content = buildMediaMessageContent(bufferDescriptor("video", "video/mp4"), {
+      caption: "Olha o clipe"
+    });
+
+    expect(content).toMatchObject({
+      video: expect.any(Buffer),
+      caption: "Olha o clipe",
+      mimetype: "video/mp4"
+    });
+  });
+
+  it("video sem caption omite o campo", () => {
+    const content = buildMediaMessageContent(bufferDescriptor("video", "video/mp4"));
+
+    expect(content).toMatchObject({ video: expect.any(Buffer) });
+    expect(content).not.toHaveProperty("caption");
+  });
+
+  it("documento com fileName e mimetype", () => {
+    const content = buildMediaMessageContent(
+      bufferDescriptor("document", "application/pdf"),
+      { fileName: "contrato.pdf" }
+    );
+
+    expect(content).toMatchObject({
+      document: expect.any(Buffer),
+      fileName: "contrato.pdf",
+      mimetype: "application/pdf"
+    });
+  });
+
+  it("documento sem fileName e recusado com INVALID_FLAG", () => {
+    try {
+      buildMediaMessageContent(bufferDescriptor("document", "application/pdf"));
+      throw new Error("deveria ter rejeitado");
+    } catch (error) {
+      expect(isAppError(error)).toBe(true);
+      if (isAppError(error)) {
+        expect(error.code).toBe("INVALID_FLAG");
+        expect(error.message).toContain("--filename");
+      }
+    }
+  });
+
+  it("caption em documento e recusada", () => {
+    try {
+      buildMediaMessageContent(bufferDescriptor("document", "application/pdf"), {
+        caption: "x",
+        fileName: "contrato.pdf"
+      });
+      throw new Error("deveria ter rejeitado");
+    } catch (error) {
+      expect(isAppError(error)).toBe(true);
+      if (isAppError(error)) {
+        expect(error.code).toBe("INVALID_FLAG");
+      }
+    }
+  });
+
   it("tipo nao liberado e recusado pela tabela", () => {
-    for (const kind of ["video", "document", "sticker"] as const) {
+    for (const kind of ["sticker"] as const) {
       try {
         buildMediaMessageContent(bufferDescriptor(kind, null));
         throw new Error(`deveria ter rejeitado ${kind}`);
@@ -141,6 +201,7 @@ describe("buildMediaMessageContent", () => {
         expect(isAppError(error)).toBe(true);
         if (isAppError(error)) {
           expect(error.code).toBe("MEDIA_TYPE_NOT_SUPPORTED_YET");
+          expect(error.message).toContain("image, audio, video, document");
         }
       }
     }

@@ -336,6 +336,38 @@ describe("download-media no CLI (ponta a ponta com daemon real)", () => {
     },
     20_000
   );
+
+  it(
+    "video sem --out grava <messageId>.mp4 no diretorio corrente com a extensao pelo MIME",
+    async () => {
+      const daemon = await startTestDaemon(async () => new Uint8Array([1, 2, 3, 4, 5]));
+      const db = daemon.db;
+      try {
+        seedLiveMessage(daemon, db, {
+          key: { remoteJid: "556784020665@s.whatsapp.net", fromMe: false, id: "3EB0CLI-VID" },
+          pushName: "Priscila",
+          messageTimestamp: 1_783_506_977,
+          message: { videoMessage: { mimetype: "video/mp4", fileLength: 5 } }
+        } as unknown as WAMessage);
+
+        const { exitCode, stdout, stderr } = await runCli(
+          ["download-media", "pessoal", "556784020665", "3EB0CLI-VID"],
+          daemon
+        );
+
+        const destination = join(daemon.dataDir, "3EB0CLI-VID.mp4");
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe("");
+        expect(stdout).toContain("video (video/mp4)");
+        expect(stdout).toContain(destination);
+        expect(existsSync(destination)).toBe(true);
+      } finally {
+        daemon.server.stop(true);
+        db.close();
+      }
+    },
+    20_000
+  );
 });
 
 

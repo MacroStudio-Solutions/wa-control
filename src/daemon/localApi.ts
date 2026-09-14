@@ -5,14 +5,22 @@ import type {
   ChatRecord,
   ContactRecord,
   CreateWebhookRequest,
+  DeleteMessageRequest,
+  GroupCreateRequest,
+  GroupParticipantsRequest,
   MessageRecord,
+  PollRequest,
+  ReactRequest,
+  ReadRequest,
   SendMessageRequest,
   SessionCommandResponse,
+  TypingRequest,
   UpdateWebhookRequest
 } from "../shared/types.ts";
 import { WEBHOOK_EVENTS, WEBHOOK_EVENT_KEYS } from "../shared/events.ts";
 import { DaemonRuntime } from "./daemonRuntime.ts";
 import { EventBus } from "./eventBus.ts";
+import { isGroupParticipantAction } from "./groupOps.ts";
 import { parseSendMediaRequest } from "./sendMediaRequest.ts";
 
 interface LocalApiOptions {
@@ -317,6 +325,137 @@ export function startLocalApiServer({
             const media = parseSendMediaRequest(request);
             const buffer = new Uint8Array(await request.arrayBuffer());
             return json(await runtime.sendMedia(sessionId, media, buffer));
+          }
+
+          // Rotas de chat aditivas: mesma disciplina do send — corpo JSON,
+          // validacao de forma antes de tocar a sessao.
+          if (request.method === "POST" && parts[2] === "typing") {
+            const body = await parseJsonBody<TypingRequest>(request);
+            if (!body.chat) {
+              throw new AppError("INVALID_REQUEST", 400, "Campo `chat` obrigatorio.");
+            }
+
+            return json(
+              await runtime.typingIndicator(sessionId, body.chat, body.recording === true)
+            );
+          }
+
+          if (request.method === "POST" && parts[2] === "read") {
+            const body = await parseJsonBody<ReadRequest>(request);
+            if (!body.chat) {
+              throw new AppError("INVALID_REQUEST", 400, "Campo `chat` obrigatorio.");
+            }
+
+            return json(
+              await runtime.markMessagesRead(sessionId, body.chat, body.messageId)
+            );
+          }
+
+          if (request.method === "POST" && parts[2] === "react") {
+            const body = await parseJsonBody<ReactRequest>(request);
+            if (!body.chat || !body.messageId || typeof body.emoji !== "string") {
+              throw new AppError(
+                "INVALID_REQUEST",
+                400,
+                "Campos `chat`, `messageId` e `emoji` obrigatorios; emoji vazio remove a reacao."
+              );
+            }
+
+            return json(
+              await runtime.reactToMessage(sessionId, body.chat, body.messageId, body.emoji)
+            );
+          }
+
+          if (request.method === "POST" && parts[2] === "delete") {
+            const body = await parseJsonBody<DeleteMessageRequest>(request);
+            if (!body.chat || !body.messageId) {
+              throw new AppError(
+                "INVALID_REQUEST",
+                400,
+                "Campos `chat` e `messageId` obrigatorios."
+              );
+            }
+
+            return json(await runtime.deleteMessage(sessionId, body.chat, body.messageId));
+          }
+
+          if (request.method === "POST" && parts[2] === "poll") {
+            const body = await parseJsonBody<PollRequest>(request);
+            if (
+              !body.chat ||
+              !body.question ||
+              !Array.isArray(body.options) ||
+              body.options.length < 2
+            ) {
+              throw new AppError(
+                "INVALID_REQUEST",
+                400,
+                "Campos `chat`, `question` e `options` obrigatorios; enquete exige no minimo 2 opcoes."
+              );
+            }
+
+            return json(await runtime.sendPoll(sessionId, body.chat, body.question, body.options));
+          }
+
+          // Rotas de grupos aditivas: mesma disciplina — corpo JSON validado
+          // em forma antes de tocar a sessao, nenhuma rota existente muda.
+          if (request.method === "POST" && parts[2] === "groups" && parts.length === 3) {
+            const body = await parseJsonBody<GroupCreateRequest>(request);
+            if (!body.subject || typeof body.subject !== "string") {
+              throw new AppError("INVALID_REQUEST", 400, "Campo `subject` obrigatorio.");
+            }
+
+            const participants = Array.isArray(body.participants) ? body.participants : [];
+            return json(await runtime.createGroup(sessionId, body.subject, participants));
+          }
+
+          if (request.method === "GET" && parts[2] === "groups" && parts[3] && parts.length === 4) {
+            return json(await runtime.groupInfo(sessionId, decodeURIComponent(parts[3])));
+          }
+
+          if (
+            request.method === "POST" &&
+            parts[2] === "groups" &&
+            parts[3] &&
+            parts[4] === "participants" &&
+            parts.length === 5
+          ) {
+            const groupJid = decodeURIComponent(parts[3]);
+            const body = await parseJsonBody<GroupParticipantsRequest>(request);
+            if (!isGroupParticipantAction(body.action)) {
+              throw new AppError(
+                "INVALID_REQUEST",
+                400,
+                "Campo `action` deve ser add, remove, promote ou demote."
+              );
+            }
+
+            if (!Array.isArray(body.participants) || body.participants.length === 0) {
+              throw new AppError(
+                "INVALID_REQUEST",
+                400,
+                "Campo `participants` obrigatorio (ao menos um numero ou JID)."
+              );
+            }
+
+            return json(
+              await runtime.updateGroupParticipants(
+                sessionId,
+                groupJid,
+                body.action,
+                body.participants
+              )
+            );
+          }
+
+          if (
+            request.method === "POST" &&
+            parts[2] === "groups" &&
+            parts[3] &&
+            parts[4] === "leave" &&
+            parts.length === 5
+          ) {
+            return json(await runtime.leaveGroup(sessionId, decodeURIComponent(parts[3])));
           }
         }
 

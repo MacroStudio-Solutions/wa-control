@@ -1,9 +1,16 @@
 import type {
   ChatRecord,
   ContactRecord,
+  DeleteMessageResponse,
+  GroupInfoResponse,
+  GroupParticipantsResponse,
   MessageRecord,
+  PollResponse,
+  ReactResponse,
+  ReadResponse,
   SessionRecord,
   StatusResponse,
+  TypingResponse,
   WebhookDeliveryRecord,
   WebhookRecord
 } from "../shared/types.ts";
@@ -25,8 +32,20 @@ Uso:
   wa disconnect <sessionId>
   wa session remove <sessionId> --yes
   wa send <sessionId> <numero> <mensagem>
-  wa send-media <sessionId> <numero|jid> <arquivo> [--type image|audio] [--caption texto] [--ptt] [--json]
+  wa send-media <sessionId> <numero|jid> <arquivo> [--type image|audio|video|document] [--caption texto] [--filename nome] [--ptt] [--json]
   wa download-media <sessionId> <chat|jid|numero> <messageId> [--out <caminho>] [--json]
+  wa typing <sessionId> <chat|jid|numero> [--recording] [--json]
+  wa read <sessionId> <chat|jid|numero> [--message-id <id>] [--json]
+  wa react <sessionId> <chat|jid|numero> <messageId> <emoji|.> [--json]
+  wa delete <sessionId> <chat|jid|numero> <messageId> [--json]
+  wa poll <sessionId> <chat|jid|numero> <pergunta> <opcao1> <opcao2> [...] [--json]
+  wa group create <sessionId> <assunto> [--participants 5567...,5511...] [--json]
+  wa group info <sessionId> <groupJid> [--json]
+  wa group add <sessionId> <groupJid> <numero1> [numero2] [...] [--json]
+  wa group remove <sessionId> <groupJid> <numero1> [...] [--json]
+  wa group promote <sessionId> <groupJid> <numero1> [...] [--json]
+  wa group demote <sessionId> <groupJid> <numero1> [...] [--json]
+  wa group leave <sessionId> <groupJid> [--json]
   wa listen <sessionId> [--raw]
   wa listen --all [--raw]
   wa events [--json]
@@ -44,23 +63,54 @@ Notas:
   connect exibe QR quando necessario e restaura sessoes persistidas.
   qr le o QR corrente sem abrir conexao: ascii no terminal, PNG em base64 com
   --base64 e o data URL pronto para exibir com --json.
-  send-media envia imagem e audio: o tipo e inferido da extensao e --type
-  sobrepoe; caption so em imagem; --ptt envia audio como voice note (a voice
+  send-media envia imagem, audio, video e documento: o tipo e inferido da
+  extensao e --type sobrepoe — e obrigatorio quando a extensao nao e
+  reconhecida (a inferencia e honesta, sem tipo errado silencioso); caption
+  em imagem e video; --filename sobrepoe o nome do documento (sem ele, o
+  nome do arquivo e usado); --ptt envia audio como voice note (a voice
   note ogg/opus carrega mimetype audio/ogg; codecs=opus). Upload tem timeout
   proprio de 60s e herda a semantica de exit codes do send: 0 entregue; 1
   falha sem transmissao (daemon parado ou erro classificado); 2 resultado
   incerto — a midia PODE ter sido enviada; conferir \`wa messages <sessionId>
   <numero>\` antes de reenviar para nao duplicar. Tipos fora da whitelist
-  (video/documento/sticker) respondem MEDIA_TYPE_NOT_SUPPORTED_YET.
+  (sticker) respondem MEDIA_TYPE_NOT_SUPPORTED_YET com os tipos liberados.
   download-media grava a midia de uma mensagem recebida (a mesma referencia
   chat + messageId que messages e o webhook entregam). Com --out grava no
   caminho dado; sem --out, no diretorio corrente como <messageId>.<extensao
-  pelo MIME>. Midia de history-sync nao tem payload bruto guardado e responde
-  MEDIA_PAYLOAD_UNAVAILABLE — peca o reenvio do arquivo; midia expirada
-  responde DOWNLOAD_FAILED, sem retry automatico. Download e read-only: nada
-  e transmitido ao WhatsApp; exit 0/1.
-  webhook sem selecao de eventos recebe todos, inclusive os que forem criados
-  depois; use --events ou set-events para restringir, e 'all' para voltar.
+  pelo MIME> — video mp4 baixa como .mp4. Midia de history-sync nao tem
+  payload bruto guardado e responde
+   MEDIA_PAYLOAD_UNAVAILABLE — peca o reenvio do arquivo; midia expirada
+   responde DOWNLOAD_FAILED, sem retry automatico. Download e read-only: nada
+   e transmitido ao WhatsApp; exit 0/1.
+   typing envia o indicador de digitacao uma unica vez; --recording troca para
+   o indicador de gravacao de audio. read marca como lida a mensagem mais
+   recente do chat; com --message-id marca aquela mensagem. Chat sem conversa
+   local: typing responde com aviso explicito e read sem mensagem recente
+   falha (READ_NO_RECENT_MESSAGE) — nunca sucesso mentiroso.
+   react reage a mensagem; emoji "." (ou string vazia) REMOVE a reacao. A
+   mensagem e referenciada pelo mesmo chat + messageId que messages e o
+   webhook entregam; inexistente no historico local sai 404.
+   delete apaga a mensagem: revoke para todos quando propria; recusa do
+   WhatsApp (mensagem antiga, sem admin em grupo) sai como erro classificado
+   com o statusCode da Baileys — degradacao honesta, exit 1.
+   poll envia enquete de 2 a 12 opcoes, validadas localmente ANTES do envio
+   (POLL_OPTIONS_TOO_FEW / POLL_OPTIONS_TOO_MANY); leitura de votos nao e
+   exposta. Todos herdam a semantica de exit codes do send: em react, delete
+   e poll, timeout depois de o daemon aceitar a operacao sai 2 — resultado
+   incerto, confira antes de repetir.
+   group gerencia grupos: create cria (o bot vira dono/superadmin; numeros em
+   --participants separados por virgula); info le metadados completos
+   (assunto, dono, descricao, criacao, participantes com admin); add/remove/
+   promote/demote atualizam participantes (recusa por participante sai com o
+   motivo acionavel — ja participa, privacidade, sem admin — e exit 1);
+   leave sai do grupo (irreversivel sem convite). JID de grupo termina em
+   @g.us; sem @ o comando falha na validacao local. Erros de classe conhecida
+   do WhatsApp tem codigo proprio: GROUP_NOT_FOUND (JID inexistente) e
+   GROUP_NOT_ALLOWED (sem permissao/admin). create/add/remove/promote/demote/
+   leave herdam a semantica do send: timeout depois de o daemon aceitar sai 2
+   — resultado incerto, confira com \`wa group info\` antes de repetir.
+   webhook sem selecao de eventos recebe todos, inclusive os que forem criados
+   depois; use --events ou set-events para restringir, e 'all' para voltar.
   webhook list sem sessao lista todos, que e como um webhook orfao — de uma
   sessao ja removida — aparece.
 `.trim();
@@ -184,4 +234,86 @@ export function renderWebhookDeliveries(deliveries: WebhookDeliveryRecord[]): st
       return `${delivery.createdAt}\t${delivery.eventName}\t${delivery.status}\t${httpStatus}\t${delivery.webhookId}`;
     })
     .join("\n");
+}
+
+export function renderTyping(result: TypingResponse): string {
+  const mode = result.recording ? "gravacao de audio" : "digitacao";
+  const note = result.note ? ` ${result.note}` : "";
+  return `Indicador de ${mode} enviado para ${result.jid}.${note}`;
+}
+
+export function renderRead(result: ReadResponse): string {
+  return `Mensagem marcada como lida em ${result.jid}: ${result.messageIds.join(", ")}`;
+}
+
+export function renderReact(result: ReactResponse): string {
+  if (result.removed) {
+    return `Reacao removida da mensagem ${result.messageId} em ${result.jid}.`;
+  }
+
+  return `Reacao ${result.emoji} enviada para a mensagem ${result.messageId} em ${result.jid}.`;
+}
+
+export function renderDelete(result: DeleteMessageResponse): string {
+  const scope = result.fromMe ? "apagada para todos" : "apagada";
+  return `Mensagem ${result.messageId} ${scope} em ${result.jid}.`;
+}
+
+export function renderPoll(result: PollResponse): string {
+  const id = result.messageId ? ` (${result.messageId})` : "";
+  return `Enquete "${result.question}" enviada para ${result.jid} com ${result.options.length} opcoes${id}.`;
+}
+
+export function renderGroupInfo(result: GroupInfoResponse): string {
+  const creation = result.creation
+    ? new Date(result.creation * 1000).toISOString().slice(0, 10)
+    : null;
+  const header = [
+    `Grupo: ${result.subject}`,
+    `jid: ${result.jid}`,
+    `tamanho: ${result.size}`,
+    result.owner ? `dono: ${result.owner}` : null,
+    result.description ? `descricao: ${result.description}` : null,
+    creation ? `criacao: ${creation}` : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  if (result.participants.length === 0) {
+    return header;
+  }
+
+  const participants = result.participants
+    .map((participant) => {
+      const name = participant.name ?? "-";
+      const role = participant.isSuperAdmin
+        ? "\tsuperadmin"
+        : participant.isAdmin
+          ? "\tadmin"
+          : "";
+      return `${name}\t${participant.jid}${role}`;
+    })
+    .join("\n");
+
+  return `${header}\nparticipantes:\n${participants}`;
+}
+
+export function renderGroupCreate(result: GroupInfoResponse): string {
+  return `Grupo "${result.subject}" criado: ${result.jid} (${result.size} participante(s), incluindo o bot como superadmin).`;
+}
+
+export function renderGroupParticipants(result: GroupParticipantsResponse): string {
+  const verb = {
+    add: "adicionado(s)",
+    remove: "removido(s)",
+    promote: "promovido(s) a admin",
+    demote: "rebaixado(s) a membro"
+  }[result.action];
+  const list = result.updated.join(", ");
+
+  return `Participante(s) ${verb} em ${result.jid}: ${list}`;
+}
+
+export function renderGroupLeave(result: { jid: string }): string {
+  return `Bot saiu do grupo ${result.jid}.`;
 }
