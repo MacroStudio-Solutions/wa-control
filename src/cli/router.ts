@@ -6,6 +6,8 @@ import { isMediaKind, listSupportedMediaKinds, type MediaKind } from "../media/m
 export type CliCommand =
   | { kind: "help" }
   | { kind: "daemon.start" }
+  | { kind: "daemon.start.background"; json: boolean }
+  | { kind: "daemon.stop"; json: boolean; waitMs?: number }
   | { kind: "status"; json: boolean }
   | { kind: "sessions"; json: boolean }
   | { kind: "chats"; sessionId: string; limit: number; json: boolean }
@@ -142,6 +144,8 @@ export function parseCliCommand(argv: string[]): CliCommand {
       arg !== "--json" &&
       arg !== "--raw" &&
       arg !== "--yes" &&
+      arg !== "--background" &&
+      arg !== "--wait-ms" &&
       arg !== "--base64" &&
       arg !== "--ptt" &&
       arg !== "--recording" &&
@@ -155,6 +159,7 @@ export function parseCliCommand(argv: string[]): CliCommand {
       arg !== "--filename" &&
       arg !== "--message-id" &&
       arg !== "--participants" &&
+      source[index - 1] !== "--wait-ms" &&
       source[index - 1] !== "--limit" &&
       source[index - 1] !== "--timeout-ms" &&
       source[index - 1] !== "--max-attempts" &&
@@ -168,7 +173,19 @@ export function parseCliCommand(argv: string[]): CliCommand {
   );
 
   if (filtered[0] === "daemon" && filtered[1] === "start") {
-    return { kind: "daemon.start" };
+    return argv.includes("--background")
+      ? { kind: "daemon.start.background", json }
+      : { kind: "daemon.start" };
+  }
+
+  if (filtered[0] === "daemon" && filtered[1] === "stop") {
+    const waitMs = extractNumberFlag(argv, "--wait-ms");
+
+    if (waitMs !== undefined && (!Number.isInteger(waitMs) || waitMs < 0)) {
+      throw new AppError("INVALID_FLAG", 400, "Use `--wait-ms` com inteiro maior ou igual a zero.");
+    }
+
+    return { kind: "daemon.stop", json, ...(waitMs !== undefined ? { waitMs } : {}) };
   }
 
   if (filtered[0] === "status") {

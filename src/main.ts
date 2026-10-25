@@ -1,5 +1,11 @@
 import { AppError, exitCodeForError, isAppError } from "./shared/errors.ts";
 import { LocalApiClient } from "./shared/localApiClient.ts";
+import { loadAppConfig } from "./config/config.ts";
+import {
+  DEFAULT_STOP_WAIT_MS,
+  startDaemonInBackground,
+  stopDaemon
+} from "./daemon/daemonControl.ts";
 import { startDaemon } from "./daemon/startDaemon.ts";
 import {
   assertConcreteDestination,
@@ -7,7 +13,7 @@ import {
   destinationPathFor,
   resolveDownloadTarget
 } from "./cli/downloadTarget.ts";
-import { readOfflineStatusSnapshot } from "./cli/localStatus.ts";
+import { STATUS_PROBE_TIMEOUT_MS, collectStatusReport } from "./cli/localStatus.ts";
 import { parseCliCommand } from "./cli/router.ts";
 import { resolveSendMediaSource } from "./cli/sendMediaSource.ts";
 import {
@@ -26,7 +32,9 @@ import {
   renderReact,
   renderRead,
   renderSessions,
+  renderStartBackground,
   renderStatus,
+  renderStopDaemon,
   renderTyping,
   renderWebhookDeliveries,
   renderWebhooks
@@ -64,30 +72,47 @@ async function run(): Promise<void> {
     return;
   }
 
-  const client = new LocalApiClient();
+  if (command.kind === "daemon.start.background") {
+    const result = await startDaemonInBackground(loadAppConfig());
 
-  switch (command.kind) {
-    case "status": {
-      try {
-        const status = await client.status();
-        console.log(command.json ? JSON.stringify(status, null, 2) : renderStatus(status));
-      } catch (error) {
-        if (
-          isAppError(error) &&
-          (error.code === "DAEMON_UNAVAILABLE" || error.code === "TOKEN_NOT_FOUND")
-        ) {
-          const snapshot = readOfflineStatusSnapshot();
-          console.log(
-            command.json ? JSON.stringify(snapshot, null, 2) : renderOfflineStatus(snapshot)
-          );
-          return;
-        }
-
-        throw error;
-      }
+    if (command.json) {
+      // o objeto do contrato do servidor gerenciado e a resposta, inclusive a
+      // recusa: sai com 0 para quem le a saida nao perder o motivo por um codigo
+      console.log(JSON.stringify(result));
       return;
     }
 
+    console.log(renderStartBackground(result));
+    process.exitCode = result.ok ? 0 : 1;
+    return;
+  }
+
+  if (command.kind === "daemon.stop") {
+    const result = await stopDaemon(loadAppConfig(), {
+      waitMs: command.waitMs ?? DEFAULT_STOP_WAIT_MS
+    });
+
+    console.log(command.json ? JSON.stringify(result) : renderStopDaemon(result));
+    process.exitCode = result.ok ? 0 : 1;
+    return;
+  }
+
+  if (command.kind === "status") {
+    const report = await collectStatusReport(
+      new LocalApiClient({ requestTimeoutMs: STATUS_PROBE_TIMEOUT_MS })
+    );
+
+    if (command.json) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(report.running ? renderStatus(report) : renderOfflineStatus(report));
+    }
+    return;
+  }
+
+  const client = new LocalApiClient();
+
+  switch (command.kind) {
     case "sessions": {
       const sessions = await client.sessions();
       console.log(command.json ? JSON.stringify(sessions, null, 2) : renderSessions(sessions));

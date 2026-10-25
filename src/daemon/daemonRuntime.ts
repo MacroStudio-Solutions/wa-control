@@ -1,4 +1,4 @@
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import type { WAMessage } from "@whiskeysockets/baileys";
 import pkg from "../../package.json" with { type: "json" };
 import { AppError } from "../shared/errors.ts";
@@ -38,10 +38,32 @@ import { EventsRepo } from "../storage/eventsRepo.ts";
 import { SessionsRepo } from "../storage/sessionsRepo.ts";
 import { WebhookDeliveriesRepo } from "../storage/webhookDeliveriesRepo.ts";
 import { WebhooksRepo } from "../storage/webhooksRepo.ts";
+import { readRuntimeFile, writeRuntimeFileAtomically, type RuntimeFileRecord } from "./daemonGuard.ts";
 import { EventBus } from "./eventBus.ts";
 import { EventPublisher } from "./eventPublisher.ts";
 import { SessionManager } from "./sessionManager.ts";
 import { WebhookDispatcher } from "./webhookDispatcher.ts";
+
+export function createDaemonRuntimeInfo(config: Pick<AppConfig, "host" | "port">): DaemonRuntimeInfo {
+  return {
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    host: config.host,
+    port: config.port,
+    version: pkg.version
+  };
+}
+
+export function buildRuntimeFileRecord(info: DaemonRuntimeInfo): RuntimeFileRecord {
+  return {
+    pid: info.pid,
+    startedAt: info.startedAt,
+    host: info.host,
+    port: info.port,
+    version: info.version,
+    executable: process.execPath
+  };
+}
 
 export class DaemonRuntime {
   readonly runtimeInfo: DaemonRuntimeInfo;
@@ -64,13 +86,7 @@ export class DaemonRuntime {
       DEFAULT_TIMEOUTS.mediaTimeoutMs
     )
   ) {
-    this.runtimeInfo = {
-      pid: process.pid,
-      startedAt: new Date().toISOString(),
-      host: config.host,
-      port: config.port,
-      version: pkg.version
-    };
+    this.runtimeInfo = createDaemonRuntimeInfo(config);
 
     this.publisher = new EventPublisher(eventsRepo, eventBus, logger);
     this.readModel = readModel;
@@ -289,32 +305,33 @@ export class DaemonRuntime {
     return { record, download };
   }
 
+  /**
+   * A partida cria o runtime.json de forma exclusiva antes de chegar aqui, entao
+   * o registro existente precisa ser o deste processo; o de outra partida
+   * recusa.
+   */
   assertDaemonCanStart(): void {
-    if (existsSync(this.config.paths.runtimePath)) {
-      throw new AppError(
-        "DAEMON_RUNTIME_FILE_EXISTS",
-        409,
-        "Runtime anterior ainda esta registrado. Rode `wa status` para validar e remova o runtime stale se necessario."
-      );
+    const current = readRuntimeFile(this.config.paths.runtimePath);
+
+    if (current.status === "missing") {
+      return;
     }
+
+    if (current.status === "readable" && current.file.pid === this.runtimeInfo.pid) {
+      return;
+    }
+
+    throw new AppError(
+      "DAEMON_RUNTIME_FILE_EXISTS",
+      409,
+      "Runtime anterior ainda esta registrado. Rode `wa status` para validar e remova o runtime stale se necessario."
+    );
   }
 
   private writeRuntimeFile(): void {
-    writeFileSync(
+    writeRuntimeFileAtomically(
       this.config.paths.runtimePath,
-      `${JSON.stringify(
-        {
-          pid: this.runtimeInfo.pid,
-          startedAt: this.runtimeInfo.startedAt,
-          host: this.runtimeInfo.host,
-          port: this.runtimeInfo.port,
-          version: this.runtimeInfo.version,
-          executable: process.execPath
-        },
-        null,
-        2
-      )}\n`,
-      "utf8"
+      buildRuntimeFileRecord(this.runtimeInfo)
     );
   }
 }

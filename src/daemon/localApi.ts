@@ -28,7 +28,18 @@ interface LocalApiOptions {
   token: string;
   eventBus: EventBus;
   logger: Logger;
+  /**
+   * Executa a parada graciosa do daemon. Sem ele a rota `POST /shutdown` nao
+   * existe (404), como em um daemon anterior a ela.
+   */
+  onShutdown?: () => void;
 }
+
+/**
+ * A resposta de `/shutdown` precisa sair antes de a parada fechar as conexoes
+ * ativas do servidor.
+ */
+const SHUTDOWN_REPLY_GRACE_MS = 50;
 
 function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
@@ -131,7 +142,8 @@ export function startLocalApiServer({
   runtime,
   token,
   eventBus,
-  logger
+  logger,
+  onShutdown
 }: LocalApiOptions) {
   return Bun.serve({
     hostname: runtime.runtimeInfo.host,
@@ -152,6 +164,11 @@ export function startLocalApiServer({
 
         if (request.method === "GET" && url.pathname === "/status") {
           return json(runtime.getStatus());
+        }
+
+        if (request.method === "POST" && url.pathname === "/shutdown" && onShutdown) {
+          setTimeout(onShutdown, SHUTDOWN_REPLY_GRACE_MS);
+          return json({ ok: true, shuttingDown: true });
         }
 
         if (request.method === "GET" && url.pathname === "/sessions") {

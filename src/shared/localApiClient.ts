@@ -76,7 +76,34 @@ export interface LocalApiClientTimeouts {
   mediaTimeoutMs?: number;
 }
 
-type DaemonGate = "open" | "closed";
+export type DaemonGate = "open" | "closed";
+
+/**
+ * Sonda TCP curta: abre o socket e devolve "open" quando algo aceita conexao e
+ * "closed" quando recusa ou nao responde dentro do limite.
+ */
+export function probeTcpGate(host: string, port: number, timeoutMs: number): Promise<DaemonGate> {
+  return new Promise<DaemonGate>((resolve) => {
+    const socket = netConnect({ host, port });
+    let settled = false;
+
+    const settle = (gate: DaemonGate) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      socket.destroy();
+      resolve(gate);
+    };
+
+    socket.on("connect", () => settle("open"));
+    socket.on("error", () => settle("closed"));
+
+    const timer = setTimeout(() => settle("closed"), timeoutMs);
+    timer.unref?.();
+  });
+}
 
 const CONNECTION_REFUSAL_MARKERS = [
   "econnrefused",
@@ -222,29 +249,9 @@ export class LocalApiClient {
    * mesmo. Abrir o socket e o unico sinal confiavel — e instantaneo quando a
    * recusa vem com RST, como na maquina do operador.
    */
-  private probeDaemonGate(): Promise<DaemonGate> {
+  probeDaemonGate(): Promise<DaemonGate> {
     const url = new URL(this.baseUrl);
-
-    return new Promise<DaemonGate>((resolve) => {
-      const socket = netConnect({ host: url.hostname, port: Number(url.port) });
-      let settled = false;
-
-      const settle = (gate: DaemonGate) => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        socket.destroy();
-        resolve(gate);
-      };
-
-      socket.on("connect", () => settle("open"));
-      socket.on("error", () => settle("closed"));
-
-      const timer = setTimeout(() => settle("closed"), this.probeTimeoutMs);
-      timer.unref?.();
-    });
+    return probeTcpGate(url.hostname, Number(url.port), this.probeTimeoutMs);
   }
 
   private async safeFetch(

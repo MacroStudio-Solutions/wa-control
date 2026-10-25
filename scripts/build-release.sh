@@ -38,11 +38,14 @@ build_windows_x64() {
   rm -rf "$target_dir" "$DIST_DIR/$slug.zip"
   mkdir -p "$target_dir"
 
+  # Sem --bytecode: o executavel Windows compilado a partir do Linux com
+  # --bytecode cai em segfault na partida (Bun 1.3.14, qualquer comando, ate
+  # `help`), tanto no alvo baseline quanto no moderno. Compilado no Windows, ou
+  # sem a flag, funciona.
   bun build "$ROOT_DIR/src/main.ts" \
     --compile \
     --target=bun-windows-x64-baseline \
     --minify \
-    --bytecode \
     --outfile="$target_dir/wa.exe"
 
   (

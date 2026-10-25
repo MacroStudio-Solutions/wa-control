@@ -21,7 +21,8 @@ export function renderHelp(): string {
 wa-control
 
 Uso:
-  wa daemon start
+  wa daemon start [--background [--json]]
+  wa daemon stop [--wait-ms 7500] [--json]
   wa status [--json]
   wa sessions [--json]
   wa chats <sessionId> [--limit 50] [--json]
@@ -60,6 +61,26 @@ Uso:
   wa webhook deliveries [sessionId] [--json]
 
 Notas:
+  daemon start sobe o servidor local em primeiro plano. Com --background, o
+  proprio programa reexecuta \`daemon start\` destacado deste processo (sessao e
+  grupo proprios no Linux, sem janela e sobrevivendo ao fim do processo no
+  Windows), com stdin fechado e a saida acrescentada ao daemon.log do diretorio
+  de dados, que ganha uma linha de cabecalho por partida (data, versao, pid e
+  porta). Espera ate 7s pela prontidao do servidor. Com --json responde um unico
+  objeto: { "ok": true, "ready": true } com o /health respondendo; { "ok": true,
+  "ready": false } se os 7s acabaram com o processo vivo (confira com \`wa status
+  --json\`); { "ok": false, "detail": "<motivo>" } se o processo morreu ou ja ha
+  um daemon vivo para o diretorio de dados. Sem --json, a recusa sai com 1.
+  daemon stop encerra o daemon deste diretorio de dados e so responde depois de
+  confirmar a morte. Sem processo vivo, responde que ja estava parado. Com
+  processo vivo, pede o encerramento gracioso ao proprio daemon (POST /shutdown
+  autenticado pelo token; funciona tambem no Windows) e espera --wait-ms (padrao
+  7500 ms, o orcamento inteiro do verbo). Sem token, com a API muda, com a API
+  ainda fechada (partida em andamento) ou com um daemon que nao conhece o
+  pedido, espera a janela graciosa, forca pelo pid do registro (no Linux,
+  SIGTERM e depois SIGKILL; no Windows, TerminateProcess), confirma a morte e
+  registra no daemon.log se a parada foi graciosa ou forcada. Sai com 1 apenas se
+  nao conseguir confirmar a morte.
   connect exibe QR quando necessario e restaura sessoes persistidas.
   qr le o QR corrente sem abrir conexao: ascii no terminal, PNG em base64 com
   --base64 e o data URL pronto para exibir com --json.
@@ -116,6 +137,35 @@ Notas:
 `.trim();
 }
 
+export function renderStartBackground(
+  result: { ok: true; ready: boolean } | { ok: false; detail: string }
+): string {
+  if (!result.ok) {
+    return `daemon nao iniciou: ${result.detail}`;
+  }
+
+  return result.ready
+    ? "daemon: pronto"
+    : "daemon: iniciado, ainda nao respondeu ao /health (confira com `wa status --json`)";
+}
+
+export function renderStopDaemon(
+  result:
+    | { ok: true; stopped: true; alreadyStopped: true }
+    | { ok: true; stopped: true; alreadyStopped: false; graceful: boolean; pid: number; elapsedMs: number }
+    | { ok: false; detail: string }
+): string {
+  if (!result.ok) {
+    return `daemon nao parou: ${result.detail}`;
+  }
+
+  if (result.alreadyStopped) {
+    return "daemon: ja estava parado";
+  }
+
+  return `daemon: parado (${result.graceful ? "parada graciosa" : "parada forcada"}, pid ${result.pid}, ${result.elapsedMs} ms)`;
+}
+
 export function renderStatus(status: StatusResponse): string {
   const connected = status.sessions.filter((session) => session.status === "connected").length;
 
@@ -129,13 +179,16 @@ export function renderStatus(status: StatusResponse): string {
   ].join("\n");
 }
 
-export function renderOfflineStatus(status: OfflineStatusSnapshot): string {
+export function renderOfflineStatus(
+  status: OfflineStatusSnapshot & { processAlive?: boolean }
+): string {
   const stale = status.daemon.stalePid ? `stale-pid=${status.daemon.stalePid}` : "clean";
 
   return [
     "daemon: offline",
     `endpoint: http://${status.daemon.host}:${status.daemon.port}`,
     `runtime: ${status.daemon.runtimeFilePresent ? stale : "absent"}`,
+    ...(status.processAlive ? ["process: alive (not responding)"] : []),
     `token: ${status.daemon.tokenPresent ? "present" : "missing"}`,
     `sessions: ${status.sessions.length} conhecidas`,
     `events: ${status.eventCount}`,

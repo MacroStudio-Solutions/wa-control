@@ -7,13 +7,19 @@ const LEVELS = {
   error: 40
 } as const;
 
-type Level = keyof typeof LEVELS;
+export type Level = keyof typeof LEVELS;
 
 export interface Logger {
   debug(message: string, details?: unknown): void;
   info(message: string, details?: unknown): void;
   warn(message: string, details?: unknown): void;
   error(message: string, details?: unknown): void;
+}
+
+export function formatLogLine(level: Level, message: string, details?: unknown): string {
+  const stamp = new Date().toISOString();
+  const payload = details === undefined ? "" : ` ${JSON.stringify(details, null, 0)}`;
+  return `[${stamp}] ${level.toUpperCase()} ${message}${payload}`;
 }
 
 export function createLogger(config: Pick<AppConfig, "logLevel">): Logger {
@@ -24,11 +30,7 @@ export function createLogger(config: Pick<AppConfig, "logLevel">): Logger {
       return;
     }
 
-    const stamp = new Date().toISOString();
-    const payload =
-      details === undefined ? "" : ` ${JSON.stringify(details, null, 0)}`;
-
-    console.error(`[${stamp}] ${level.toUpperCase()} ${message}${payload}`);
+    console.error(formatLogLine(level, message, details));
   }
 
   return {
