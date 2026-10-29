@@ -71,7 +71,9 @@ function parseStatus(result: CliResult): Record<string, unknown> & {
   expect(result.exitCode).toBe(0);
   expect(result.elapsedMs).toBeLessThan(STATUS_BUDGET_MS);
 
-  const parsed = JSON.parse(result.stdout);
+  const lines = result.stdout.trim().split("\n");
+  expect(lines).toHaveLength(1);
+  const parsed = JSON.parse(lines[0] ?? "");
   expect(typeof parsed).toBe("object");
   expect(Array.isArray(parsed)).toBe(false);
   return parsed;

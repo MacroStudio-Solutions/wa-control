@@ -103,7 +103,7 @@ async function run(): Promise<void> {
     );
 
     if (command.json) {
-      console.log(JSON.stringify(report, null, 2));
+      console.log(JSON.stringify(report));
     } else {
       console.log(report.running ? renderStatus(report) : renderOfflineStatus(report));
     }
