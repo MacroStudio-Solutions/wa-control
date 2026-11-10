@@ -70,6 +70,26 @@ export class EventsRepo {
   }
 
   /**
+   * Retencao de historico (todas as sessoes): apaga o journal de mensagens
+   * anterior ao corte. O payload bruto do Baileys — a midia local — vive
+   * neste journal, entao sem esta limpeza a midia continuaria acessivel e o
+   * replay de reidratacao do daemon recriaria as mensagens apagadas.
+   * Eventos de sessao, conexao e webhook ficam: estado de sessao esta fora do
+   * prazo de conversa. Devolve quantas linhas sairam.
+   */
+  deleteMessageHistoryBefore(cutoffSeconds: number): number {
+    const result = this.db
+      .query(`
+        DELETE FROM events
+        WHERE created_at < ?1
+          AND event_name IN ('message.received', 'message.sent', 'message.error')
+      `)
+      .run(cutoffSeconds);
+
+    return result.changes;
+  }
+
+  /**
    * Eventos `message.received` ao vivo guardam o payload bruto do Baileys;
    * midia de history-sync nao gera evento — para ela devolvemos null e o
    * pipeline de download classifica MEDIA_PAYLOAD_UNAVAILABLE.

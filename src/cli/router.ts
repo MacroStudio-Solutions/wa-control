@@ -88,6 +88,7 @@ export type CliCommand =
   | { kind: "webhook.toggle-event"; id: string; event: string; enabled: boolean }
   | { kind: "webhook.set-enabled"; id: string; enabled: boolean }
   | { kind: "webhook.deliveries"; sessionId?: string; json: boolean }
+  | { kind: "history.prune"; olderThanDays: number; json: boolean }
   | { kind: "events"; json: boolean };
 
 function extractNumberFlag(args: string[], flag: string): number | undefined {
@@ -159,6 +160,7 @@ export function parseCliCommand(argv: string[]): CliCommand {
       arg !== "--filename" &&
       arg !== "--message-id" &&
       arg !== "--participants" &&
+      arg !== "--older-than-days" &&
       source[index - 1] !== "--wait-ms" &&
       source[index - 1] !== "--limit" &&
       source[index - 1] !== "--timeout-ms" &&
@@ -169,7 +171,8 @@ export function parseCliCommand(argv: string[]): CliCommand {
       source[index - 1] !== "--caption" &&
       source[index - 1] !== "--filename" &&
       source[index - 1] !== "--message-id" &&
-      source[index - 1] !== "--participants"
+      source[index - 1] !== "--participants" &&
+      source[index - 1] !== "--older-than-days"
   );
 
   if (filtered[0] === "daemon" && filtered[1] === "start") {
@@ -198,6 +201,30 @@ export function parseCliCommand(argv: string[]): CliCommand {
 
   if (filtered[0] === "events") {
     return { kind: "events", json };
+  }
+
+  if (filtered[0] === "history" && filtered[1] === "prune") {
+    // Contrato fixado: --older-than-days inteiro >= 1. Validado aqui, na
+    // borda, antes de tocar no banco — n invalido nunca vira limpeza.
+    const olderThanDays = extractNumberFlag(argv, "--older-than-days");
+
+    if (olderThanDays === undefined) {
+      throw new AppError(
+        "INVALID_FLAG",
+        400,
+        "Informe `--older-than-days` com um numero inteiro maior ou igual a 1."
+      );
+    }
+
+    if (!Number.isInteger(olderThanDays) || olderThanDays < 1) {
+      throw new AppError(
+        "INVALID_FLAG",
+        400,
+        "Use `--older-than-days` com um numero inteiro maior ou igual a 1."
+      );
+    }
+
+    return { kind: "history.prune", olderThanDays, json };
   }
 
   if (filtered[0] === "chats" && filtered[1]) {
