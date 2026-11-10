@@ -15,6 +15,7 @@ import type {
   WebhookRecord
 } from "../shared/types.ts";
 import type { OfflineStatusSnapshot } from "./localStatus.ts";
+import type { HistoryPruneResult } from "./historyPrune.ts";
 
 export function renderHelp(): string {
   return `
@@ -50,6 +51,8 @@ Uso:
   wa listen <sessionId> [--raw]
   wa listen --all [--raw]
   wa events [--json]
+
+  wa history prune --older-than-days <n> [--json]
   wa webhook add <sessionId> <url> [--events a,b] [--timeout-ms 5000] [--max-attempts 3]
   wa webhook list [sessionId] [--json]
   wa webhook set-events <id> <a,b|all>
@@ -134,6 +137,15 @@ Notas:
    depois; use --events ou set-events para restringir, e 'all' para voltar.
   webhook list sem sessao lista todos, que e como um webhook orfao — de uma
   sessao ja removida — aparece.
+  history prune apaga o historico local de conversas anterior ao corte, em
+  todas as sessoes: as mensagens e a midia local guardada com elas.
+  --older-than-days e obrigatorio e aceita inteiro >= 1 (dias). Nao toca em
+  credencial nem em estado de sessao (sessoes, contatos, chats e webhooks
+  permanecem); rodar de novo com o mesmo corte nao apaga mais nada. Com --json
+  responde um unico objeto { "ok": true, "removed": <mensagens removidas>,
+  "olderThan": "<ISO do corte>" }; erro sai tipado em uma linha como
+  { "ok": false, "code": <codigo>, "message": <motivo> } com exit 1. Feito
+  para uma rotina chamar de hora em hora.
 `.trim();
 }
 
@@ -164,6 +176,10 @@ export function renderStopDaemon(
   }
 
   return `daemon: parado (${result.graceful ? "parada graciosa" : "parada forcada"}, pid ${result.pid}, ${result.elapsedMs} ms)`;
+}
+
+export function renderHistoryPrune(result: HistoryPruneResult): string {
+  return `historico local ate ${result.olderThan} podado: ${result.removed} mensagem(ns) removida(s)`;
 }
 
 export function renderStatus(status: StatusResponse): string {

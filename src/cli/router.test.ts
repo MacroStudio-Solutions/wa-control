@@ -546,4 +546,38 @@ describe("parseCliCommand", () => {
       json: false
     });
   });
+
+  it("parses history prune with older-than-days and json", () => {
+    expect(parseCliCommand(["history", "prune", "--older-than-days", "5", "--json"])).toEqual({
+      kind: "history.prune",
+      olderThanDays: 5,
+      json: true
+    });
+
+    expect(parseCliCommand(["history", "prune", "--older-than-days", "1"])).toEqual({
+      kind: "history.prune",
+      olderThanDays: 1,
+      json: false
+    });
+  });
+
+  it("rejects history prune without --older-than-days", () => {
+    expect(() => parseCliCommand(["history", "prune", "--json"])).toThrow(/older-than-days/);
+    expect(() => parseCliCommand(["history", "prune"])).toThrow(/older-than-days/);
+  });
+
+  it("rejects history prune with non-integer or sub-1 days", () => {
+    expect(() => parseCliCommand(["history", "prune", "--older-than-days", "1.5"])).toThrow(
+      /inteiro maior ou igual a 1/
+    );
+    expect(() => parseCliCommand(["history", "prune", "--older-than-days", "0"])).toThrow(
+      /inteiro maior ou igual a 1/
+    );
+    expect(() => parseCliCommand(["history", "prune", "--older-than-days", "-3"])).toThrow(
+      /inteiro maior ou igual a 1/
+    );
+    expect(() => parseCliCommand(["history", "prune", "--older-than-days", "cinco"])).toThrow(
+      /Valor invalido/
+    );
+  });
 });

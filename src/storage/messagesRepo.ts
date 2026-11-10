@@ -263,4 +263,22 @@ export class MessagesRepo {
   deleteSession(sessionId: string): void {
     this.db.query("DELETE FROM messages WHERE session_id = ?1").run(sessionId);
   }
+
+  /**
+   * Retencao de historico (todas as sessoes): apaga mensagens anteriores ao
+   * corte. Linhas com unix_seconds comparam em segundos; as sem (raro, mas
+   * possivel) comparam pelo timestamp ISO — sempre UTC via toISOString, entao
+   * a comparacao textual e fiel. Devolve quantas linhas sairam.
+   */
+  deleteBefore(cutoffSeconds: number, cutoffIso: string): number {
+    const result = this.db
+      .query(`
+        DELETE FROM messages
+        WHERE (unix_seconds IS NOT NULL AND unix_seconds < ?1)
+           OR (unix_seconds IS NULL AND timestamp < ?2)
+      `)
+      .run(cutoffSeconds, cutoffIso);
+
+    return result.changes;
+  }
 }

@@ -14,6 +14,7 @@ import {
   resolveDownloadTarget
 } from "./cli/downloadTarget.ts";
 import { STATUS_PROBE_TIMEOUT_MS, collectStatusReport } from "./cli/localStatus.ts";
+import { pruneHistory } from "./cli/historyPrune.ts";
 import { parseCliCommand } from "./cli/router.ts";
 import { resolveSendMediaSource } from "./cli/sendMediaSource.ts";
 import {
@@ -26,6 +27,7 @@ import {
   renderGroupLeave,
   renderGroupParticipants,
   renderHelp,
+  renderHistoryPrune,
   renderMessages,
   renderOfflineStatus,
   renderPoll,
@@ -107,6 +109,15 @@ async function run(): Promise<void> {
     } else {
       console.log(report.running ? renderStatus(report) : renderOfflineStatus(report));
     }
+    return;
+  }
+
+  // Poda de historico e operacao local, como o status: abre o banco direto e
+  // nao depende de daemon vivo (WAL + busy_timeout cobrem a escrita
+  // concorrente do daemon).
+  if (command.kind === "history.prune") {
+    const result = pruneHistory({ olderThanDays: command.olderThanDays });
+    console.log(command.json ? JSON.stringify(result) : renderHistoryPrune(result));
     return;
   }
 
@@ -486,6 +497,21 @@ async function run(): Promise<void> {
 
 run().catch((error) => {
   const message = isAppError(error) ? error.message : error instanceof Error ? error.message : "Erro inesperado";
-  console.error(message);
+  const argv = process.argv.slice(2);
+
+  // Contrato do history prune: com --json, o erro sai tipado em uma unica
+  // linha — quem chama de hora em hora precisa ler o motivo programaticamente.
+  if (argv[0] === "history" && argv[1] === "prune" && argv.includes("--json")) {
+    console.log(
+      JSON.stringify({
+        ok: false,
+        code: isAppError(error) ? error.code : "INTERNAL_ERROR",
+        message
+      })
+    );
+  } else {
+    console.error(message);
+  }
+
   process.exit(exitCodeForError(error));
 });
