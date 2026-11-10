@@ -104,10 +104,28 @@ function extractStatusCode(error: unknown): number | null {
   return null;
 }
 
+function extractStreamErrorReason(message: string): string | null {
+  const match = /^Stream Errored \((.+)\)$/.exec(message);
+  return match?.[1] ?? null;
+}
+
+/**
+ * Falha de autenticacao comprovada: o erro nomeia a recusa de autorizacao do
+ * WhatsApp (stream error 'not-authorized') ou prova que o material da
+ * credencial e criptograficamente invalido ('Bad MAC' / 'Failed to decrypt'
+ * no handshake). Qualquer outro erro — inclusive o balde ambiguo do
+ * badSession — nao prova nada sobre a credencial.
+ */
+function isProvenAuthFailure(message: string): boolean {
+  return (
+    extractStreamErrorReason(message) === "not-authorized" ||
+    /bad mac|failed to decrypt/i.test(message)
+  );
+}
+
 function shouldReconnect(statusCode: number | null): boolean {
   return ![
     DisconnectReason.loggedOut,
-    DisconnectReason.badSession,
     DisconnectReason.connectionReplaced,
     DisconnectReason.multideviceMismatch
   ].includes(statusCode ?? -1);
@@ -116,6 +134,12 @@ function shouldReconnect(statusCode: number | null): boolean {
 function reconnectDelay(attempt: number): number {
   return Math.min(1000 * 2 ** Math.max(0, attempt - 1), 30_000);
 }
+
+// Limite de reconexao do balde ambiguo do badSession (500): o Baileys mapeia
+// stream error com motivo fora do CODE_MAP (ex.: "ack") para badSession, entao
+// esse codigo nao prova que a credencial esta invalida e so pode ser tentado
+// um numero limitado de vezes.
+const MAX_RECONNECT_ATTEMPTS = 8;
 
 function normalizeDestinationForLookup(input: string): string {
   return input.replace(/\D/g, "");
@@ -126,6 +150,7 @@ export class ManagedSession {
   private startPromise: Promise<void> | null = null;
   private reconnectTimer: Timer | null = null;
   private manualDisconnect = false;
+  private authFailureProven = false;
   private qrTerminal: string | null = null;
   private readonly waiters = new Set<(result: ConnectResult) => void>();
 
@@ -155,11 +180,13 @@ export class ManagedSession {
     }
 
     this.manualDisconnect = false;
+    this.authFailureProven = false;
     this.clearReconnectTimer();
 
     await this.persist({
       active: true,
-      lastError: null
+      lastError: null,
+      reconnectAttempts: 0
     });
 
     void this.ensureSocket().catch((error) => {
@@ -856,6 +883,8 @@ export class ManagedSession {
     if (update.connection === "open") {
       const phoneNumber = extractPhoneNumberFromJid(this.socket?.user?.id);
 
+      this.authFailureProven = false;
+
       await this.persist({
         status: "connected",
         active: true,
@@ -894,34 +923,47 @@ export class ManagedSession {
       return;
     }
 
-    if (reconnecting) {
-      const attempts = this.session.reconnectAttempts + 1;
-      const delay = reconnectDelay(attempts);
-
-      await this.persist({
-        status: "reconnecting",
-        active: true,
-        lastError: disconnectMessage,
-        qr: null,
-        reconnectAttempts: attempts
-      });
-
-      this.publisher.create("session.disconnected", this.session.id, {
-        reason: statusCode,
-        reconnecting: true,
-        reconnectInMs: delay,
-        error: disconnectMessage
-      });
-
-      this.scheduleReconnect(delay);
-      return;
+    if (isProvenAuthFailure(disconnectMessage)) {
+      this.authFailureProven = true;
     }
 
-    if (
+    if (reconnecting) {
+      const attempts = this.session.reconnectAttempts + 1;
+      const boundedRetry = statusCode === DisconnectReason.badSession;
+
+      if (!boundedRetry || attempts <= MAX_RECONNECT_ATTEMPTS) {
+        const delay = reconnectDelay(attempts);
+
+        await this.persist({
+          status: "reconnecting",
+          active: true,
+          lastError: disconnectMessage,
+          qr: null,
+          reconnectAttempts: attempts
+        });
+
+        this.publisher.create("session.disconnected", this.session.id, {
+          reason: statusCode,
+          reconnecting: true,
+          reconnectInMs: delay,
+          error: disconnectMessage
+        });
+
+        this.scheduleReconnect(delay);
+        return;
+      }
+    }
+
+    // A credencial so e apagada quando o WhatsApp de fato desconectou o
+    // aparelho (loggedOut), quando o vinculo e irrecuperavel
+    // (multideviceMismatch) ou quando as tentativas se esgotaram com falha de
+    // autenticacao comprovada. Erro passageiro nunca custa o pareamento.
+    const deleteCredentials =
       statusCode === DisconnectReason.loggedOut ||
-      statusCode === DisconnectReason.badSession ||
-      statusCode === DisconnectReason.multideviceMismatch
-    ) {
+      statusCode === DisconnectReason.multideviceMismatch ||
+      (statusCode === DisconnectReason.badSession && this.authFailureProven);
+
+    if (deleteCredentials) {
       rmSync(this.getAuthDir(), { recursive: true, force: true });
     }
 
@@ -929,7 +971,8 @@ export class ManagedSession {
       status: statusCode === DisconnectReason.connectionReplaced ? "error" : "disconnected",
       active: false,
       lastError: disconnectMessage,
-      qr: null
+      qr: null,
+      reconnectAttempts: 0
     });
 
     this.publisher.create("session.disconnected", this.session.id, {
