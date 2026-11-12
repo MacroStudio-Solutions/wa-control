@@ -1,4 +1,4 @@
-import type { WAMessage } from "@whiskeysockets/baileys";
+import { jidNormalizedUser, type WAMessage } from "@whiskeysockets/baileys";
 import { extractMessageContentInfo } from "./messageContent.ts";
 import { classifyChatJid, isGroupJid, resolveIdentity } from "../shared/jids.ts";
 import type { NormalizedEvent } from "../shared/types.ts";
@@ -27,16 +27,20 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+/**
+ * Normaliza uma mensagem `notify` do Baileys em `message.received`. Mensagem
+ * propria (`fromMe`) tambem entra, marcada `fromMe: true`: e o que a loja
+ * digita no WhatsApp do aparelho. Envios feitos por este daemon chegam como
+ * `append` e nunca passam por aqui; eles ja viram `message.sent`.
+ */
 export function normalizeIncomingMessage(
   sessionId: string,
   message: WAMessage,
   authDir: string,
-  includeRaw = false
+  includeRaw = false,
+  selfJid: string | null = null
 ): NormalizedEvent | null {
-  if (message.key.fromMe) {
-    return null;
-  }
-
+  const fromMe = Boolean(message.key.fromMe);
   const chatId = message.key.remoteJid;
   if (!chatId) {
     return null;
@@ -48,12 +52,23 @@ export function normalizeIncomingMessage(
   // O WhatsApp entrega o endereco alternativo (numero, quando o envelope veio por
   // LID) ao lado do principal — e dali que sai o numero do contato.
   const inGroup = isGroupJid(chatId);
-  const senderJid = optionalString(message.key.participant) ?? chatId;
+  // Mensagem propria numa conversa direta foi enviada pela propria conta, nao
+  // pelo contato: o remetente e a conta conectada, sem endereco alternativo.
+  const ownSelf = optionalString(selfJid);
+  const senderJid =
+    optionalString(message.key.participant) ??
+    (fromMe && ownSelf ? jidNormalizedUser(ownSelf) : chatId);
   const senderAlt = inGroup
     ? optionalString(message.key.participantAlt)
-    : optionalString(message.key.remoteJidAlt);
+    : fromMe
+      ? null
+      : optionalString(message.key.remoteJidAlt);
 
-  const chat = resolveIdentity(authDir, chatId, inGroup ? null : senderAlt);
+  const chat = resolveIdentity(
+    authDir,
+    chatId,
+    inGroup ? null : optionalString(message.key.remoteJidAlt)
+  );
   const sender = resolveIdentity(authDir, senderJid, senderAlt);
 
   const event: NormalizedEvent = {
@@ -74,7 +89,7 @@ export function normalizeIncomingMessage(
     // da sessao, mas nao e o numero que o operador conhece.
     senderResolved: sender.resolved,
     pushName: optionalString(message.pushName),
-    fromMe: false,
+    fromMe,
     type: contentInfo.type,
     text: contentInfo.text,
     rawMessageType: contentInfo.rawMessageType

@@ -116,11 +116,44 @@ describe("normalizeIncomingMessage", () => {
     expect(event?.senderResolved).toBe(true);
   });
 
-  it("ignores outbound messages", () => {
-    const message = directMessage({ remoteJid: "88356755087579@lid" });
+  it("delivers a message typed on the phone as fromMe, with the account as sender", () => {
+    const message = directMessage({
+      remoteJid: "88356755087579@lid",
+      remoteJidAlt: "556784020665@s.whatsapp.net"
+    });
     message.key.fromMe = true;
+    message.message = { conversation: "Ja separei seu pedido" };
 
-    expect(normalizeIncomingMessage("pessoal", message, createAuthDir())).toBeNull();
+    const event = normalizeIncomingMessage(
+      "pessoal",
+      message,
+      createAuthDir(),
+      false,
+      "556799990000:12@s.whatsapp.net"
+    );
+
+    expect(event).not.toBeNull();
+    expect(event?.event).toBe("message.received");
+    expect(event?.fromMe).toBe(true);
+    expect(event?.chatId).toBe("88356755087579@lid");
+    expect(event?.chatType).toBe("direct");
+    expect(event?.chatPhoneNumber).toBe("556784020665");
+    expect(event?.from).toBe("556799990000@s.whatsapp.net");
+    expect(event?.fromPhoneNumber).toBe("556799990000");
+    expect(event?.text).toBe("Ja separei seu pedido");
+  });
+
+  it("keeps fromMe false for a contact message", () => {
+    const event = normalizeIncomingMessage(
+      "pessoal",
+      directMessage({ remoteJid: "556784020665@s.whatsapp.net" }),
+      createAuthDir(),
+      false,
+      "556799990000:12@s.whatsapp.net"
+    );
+
+    expect(event?.fromMe).toBe(false);
+    expect(event?.from).toBe("556784020665@s.whatsapp.net");
   });
 
   it("exposes the normalized type vocabulary with rawMessageType", () => {
