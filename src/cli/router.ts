@@ -10,7 +10,8 @@ export type CliCommand =
   | { kind: "daemon.stop"; json: boolean; waitMs?: number }
   | { kind: "status"; json: boolean }
   | { kind: "sessions"; json: boolean }
-  | { kind: "chats"; sessionId: string; limit: number; json: boolean }
+  | { kind: "chats"; sessionId: string; limit: number; cursor?: string; json: boolean }
+  | { kind: "profile-picture"; sessionId: string; chat: string; out?: string; json: boolean }
   | { kind: "contacts"; sessionId: string; limit: number; json: boolean }
   | { kind: "messages"; sessionId: string; chat: string; limit: number; json: boolean }
   | { kind: "connect"; sessionId: string; json: boolean }
@@ -161,6 +162,7 @@ export function parseCliCommand(argv: string[]): CliCommand {
       arg !== "--message-id" &&
       arg !== "--participants" &&
       arg !== "--older-than-days" &&
+      arg !== "--cursor" &&
       source[index - 1] !== "--wait-ms" &&
       source[index - 1] !== "--limit" &&
       source[index - 1] !== "--timeout-ms" &&
@@ -172,7 +174,8 @@ export function parseCliCommand(argv: string[]): CliCommand {
       source[index - 1] !== "--filename" &&
       source[index - 1] !== "--message-id" &&
       source[index - 1] !== "--participants" &&
-      source[index - 1] !== "--older-than-days"
+      source[index - 1] !== "--older-than-days" &&
+      source[index - 1] !== "--cursor"
   );
 
   if (filtered[0] === "daemon" && filtered[1] === "start") {
@@ -228,10 +231,23 @@ export function parseCliCommand(argv: string[]): CliCommand {
   }
 
   if (filtered[0] === "chats" && filtered[1]) {
+    const cursor = extractStringFlag(argv, "--cursor");
     return {
       kind: "chats",
       sessionId: filtered[1],
       limit: extractNumberFlag(argv, "--limit") ?? 50,
+      ...(cursor !== undefined ? { cursor } : {}),
+      json
+    };
+  }
+
+  if (filtered[0] === "profile-picture" && filtered[1] && filtered[2]) {
+    const out = extractStringFlag(argv, "--out");
+    return {
+      kind: "profile-picture",
+      sessionId: filtered[1],
+      chat: filtered[2],
+      ...(out !== undefined ? { out } : {}),
       json
     };
   }

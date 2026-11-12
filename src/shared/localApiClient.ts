@@ -4,12 +4,13 @@ import { loadAppConfig } from "../config/config.ts";
 import { readLocalToken } from "../config/token.ts";
 import type {
   ApiErrorBody,
-  ChatRecord,
+  ChatListItem,
   ContactRecord,
   CreateWebhookRequest,
   DeleteMessageRequest,
   DeleteMessageResponse,
   DownloadMediaResponse,
+  ProfilePictureResponse,
   GroupCreateRequest,
   GroupCreateResponse,
   GroupInfoResponse,
@@ -323,10 +324,61 @@ export class LocalApiClient {
     return this.requestJson<SessionRecord[]>("/sessions");
   }
 
-  async chats(sessionId: string, limit = 50): Promise<ChatRecord[]> {
-    return this.requestJson<ChatRecord[]>(
-      `/sessions/${encodeURIComponent(sessionId)}/chats?limit=${encodeURIComponent(String(limit))}`
+  async chats(sessionId: string, limit = 50, cursor?: string): Promise<ChatListItem[]> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor !== undefined) {
+      query.set("cursor", cursor);
+    }
+    return this.requestJson<ChatListItem[]>(
+      `/sessions/${encodeURIComponent(sessionId)}/chats?${query.toString()}`
     );
+  }
+
+  /**
+   * Foto de perfil (miniatura) de um contato. "Sem foto" volta como resultado
+   * (`found: false` com o motivo), nunca como erro.
+   */
+  async profilePicture(sessionId: string, chat: string): Promise<ProfilePictureResponse> {
+    const query = new URLSearchParams({ chat });
+    const response = await this.safeFetch(
+      `${this.baseUrl}/sessions/${encodeURIComponent(sessionId)}/profile-picture?${query.toString()}`,
+      {
+        headers: this.buildHeaders()
+      },
+      this.mediaTimeoutMs,
+      () =>
+        new AppError(
+          "PROFILE_PICTURE_TIMEOUT",
+          504,
+          `A foto de perfil nao chegou em ${Math.round(this.mediaTimeoutMs / 1000)}s. Tente novamente.`,
+          { sessionId, chat }
+        )
+    );
+
+    if (!response.ok) {
+      await parseError(response);
+    }
+
+    const header = (name: string): string => response.headers.get(name) ?? "";
+    const base = {
+      jid: header("x-picture-jid"),
+      fetchedAt: header("x-picture-fetched-at"),
+      cached: header("x-picture-cached") === "true"
+    };
+    if (header("x-picture-status") !== "found") {
+      const reason = header("x-picture-reason") === "not-authorized" ? "not-authorized" : "not-found";
+      await response.arrayBuffer();
+      return { found: false, reason, ...base };
+    }
+
+    const buffer = new Uint8Array(await response.arrayBuffer());
+    return {
+      found: true,
+      mimeType: header("x-picture-mime") || "image/jpeg",
+      size: buffer.byteLength,
+      buffer,
+      ...base
+    };
   }
 
   async contacts(sessionId: string, limit = 100): Promise<ContactRecord[]> {
