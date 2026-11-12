@@ -1,3 +1,4 @@
+import type { ProfilePictureResult } from "./profilePicture.ts";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { AppError } from "../shared/errors.ts";
@@ -158,6 +159,11 @@ export class SessionManager {
   ): Promise<ReadResponse> {
     const controller = this.getExistingController(sessionId);
     return controller.markMessagesRead(chat, messageId);
+  }
+
+  async profilePicture(sessionId: string, chat: string): Promise<ProfilePictureResult> {
+    const controller = this.getExistingController(sessionId);
+    return controller.profilePicture(chat);
   }
 
   async reactToMessage(

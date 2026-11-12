@@ -2,7 +2,7 @@ import { AppError, isAppError, toApiErrorBody } from "../shared/errors.ts";
 import { stringifyEvent, stripRawFromEvent } from "../shared/eventSerde.ts";
 import type { Logger } from "../shared/logger.ts";
 import type {
-  ChatRecord,
+  ChatListItem,
   ContactRecord,
   CreateWebhookRequest,
   DeleteMessageRequest,
@@ -272,7 +272,13 @@ export function startLocalApiServer({
           }
 
           if (request.method === "GET" && parts[2] === "chats") {
-            return json(runtime.listChats(sessionId, parseLimit(url, 50)) satisfies ChatRecord[]);
+            return json(
+              runtime.listChats(
+                sessionId,
+                parseLimit(url, 50),
+                url.searchParams.get("cursor") ?? undefined
+              ) satisfies ChatListItem[]
+            );
           }
 
           if (request.method === "GET" && parts[2] === "contacts") {
@@ -288,6 +294,38 @@ export function startLocalApiServer({
             return json(
               runtime.listMessages(sessionId, chat, parseLimit(url, 50)) satisfies MessageRecord[]
             );
+          }
+
+          if (request.method === "GET" && parts[2] === "profile-picture") {
+            const chat = url.searchParams.get("chat");
+            if (!chat) {
+              throw new AppError("CHAT_REQUIRED", 400, "Parametro `chat` obrigatorio.");
+            }
+
+            const picture = await runtime.profilePicture(sessionId, chat);
+            if (!picture.found) {
+              return new Response(null, {
+                status: 200,
+                headers: {
+                  "x-picture-status": "none",
+                  "x-picture-reason": picture.reason,
+                  "x-picture-jid": picture.jid,
+                  "x-picture-fetched-at": picture.fetchedAt,
+                  "x-picture-cached": String(picture.cached)
+                }
+              });
+            }
+
+            return new Response(Buffer.from(picture.buffer), {
+              headers: {
+                "content-type": "application/octet-stream",
+                "x-picture-status": "found",
+                "x-picture-mime": picture.mimeType,
+                "x-picture-jid": picture.jid,
+                "x-picture-fetched-at": picture.fetchedAt,
+                "x-picture-cached": String(picture.cached)
+              }
+            });
           }
 
           if (request.method === "GET" && parts[2] === "download-media") {

@@ -117,6 +117,24 @@ export interface DownloadMediaResponse {
   buffer: Uint8Array;
 }
 
+export type ProfilePictureResponse =
+  | {
+      found: true;
+      jid: string;
+      mimeType: string;
+      size: number;
+      buffer: Uint8Array;
+      fetchedAt: string;
+      cached: boolean;
+    }
+  | {
+      found: false;
+      jid: string;
+      reason: "not-found" | "not-authorized";
+      fetchedAt: string;
+      cached: boolean;
+    };
+
 export interface TypingRequest {
   chat: string;
   recording?: boolean;
@@ -341,6 +359,15 @@ export interface ChatRecord {
   lastMessageText: string | null;
   lastMessageTimestamp: string | null;
   updatedAt: string;
+}
+
+/**
+ * Linha de `chats` com a posicao dela na lista (`cursor`, opaco): passar o
+ * `cursor` da ultima linha em `--cursor` devolve a pagina seguinte, estavel
+ * mesmo quando uma conversa nova sobe ao topo entre uma pagina e outra.
+ */
+export interface ChatListItem extends ChatRecord {
+  cursor: string;
 }
 
 export interface ContactRecord {

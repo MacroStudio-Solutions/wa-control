@@ -26,7 +26,8 @@ Uso:
   wa daemon stop [--wait-ms 7500] [--json]
   wa status [--json]
   wa sessions [--json]
-  wa chats <sessionId> [--limit 50] [--json]
+  wa chats <sessionId> [--limit 50] [--cursor <cursor>] [--json]
+  wa profile-picture <sessionId> <chat|jid|numero> [--out <caminho>] [--json]
   wa contacts <sessionId> [--limit 100] [--json]
   wa messages <sessionId> <chat|jid|numero> [--limit 50] [--json]
   wa connect <sessionId> [--json]
@@ -106,6 +107,15 @@ Notas:
    MEDIA_PAYLOAD_UNAVAILABLE — peca o reenvio do arquivo; midia expirada
    responde DOWNLOAD_FAILED, sem retry automatico. Download e read-only: nada
    e transmitido ao WhatsApp; exit 0/1.
+   chats lista da conversa mais recente para a mais antiga; cada linha traz um
+   cursor opaco, e --cursor <cursor da ultima linha> devolve a pagina seguinte
+   sem repetir conversa mesmo que uma nova suba ao topo entre as paginas.
+   profile-picture baixa a miniatura da foto de perfil do contato (so
+   leitura). Com --out grava no caminho dado; sem --out, no diretorio corrente.
+   Contato sem foto ou com a foto escondida pela privacidade responde exit 0
+   com found:false e reason not-found ou not-authorized, nunca erro. O
+   resultado fica so em memoria no daemon (6 h com foto, 1 h sem) e as
+   consultas ao WhatsApp correm uma de cada vez.
    typing envia o indicador de digitacao uma unica vez; --recording troca para
    o indicador de gravacao de audio. read marca como lida a mensagem mais
    recente do chat; com --message-id marca aquela mensagem. Chat sem conversa

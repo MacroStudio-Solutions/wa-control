@@ -1,6 +1,13 @@
 import type { BaileysEventMap, WAMessage, WASocket } from "@whiskeysockets/baileys";
 import { extractMessageContentInfo } from "../baileys/messageContent.ts";
-import type { AppConfig, ChatRecord, ContactRecord, MessageRecord, NormalizedEvent } from "../shared/types.ts";
+import type {
+  AppConfig,
+  ChatListItem,
+  ChatRecord,
+  ContactRecord,
+  MessageRecord,
+  NormalizedEvent
+} from "../shared/types.ts";
 import {
   buildQueryCandidates,
   classifyChatJid,
@@ -10,7 +17,7 @@ import {
 } from "../shared/jids.ts";
 import { isMediaKind } from "../media/mediaTypes.ts";
 import { nowIso, nowUnix } from "../shared/utils.ts";
-import { ChatsRepo } from "../storage/chatsRepo.ts";
+import { type ChatCursor, ChatsRepo } from "../storage/chatsRepo.ts";
 import { ContactsRepo } from "../storage/contactsRepo.ts";
 import { MessagesRepo } from "../storage/messagesRepo.ts";
 
@@ -179,8 +186,8 @@ export class ReadModelStore {
     }
   }
 
-  listChats(sessionId: string, limit = 50): ChatRecord[] {
-    return this.chatsRepo.list(sessionId, limit);
+  listChats(sessionId: string, limit = 50, after?: ChatCursor): ChatListItem[] {
+    return this.chatsRepo.list(sessionId, limit, after);
   }
 
   listContacts(sessionId: string, limit = 100): ContactRecord[] {

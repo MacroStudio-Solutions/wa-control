@@ -59,6 +59,28 @@ describe("parseCliCommand", () => {
     });
   });
 
+  it("parses chats with cursor", () => {
+    expect(parseCliCommand(["chats", "pessoal", "--limit", "10", "--cursor", "c1.abc", "--json"])).toEqual({
+      kind: "chats",
+      sessionId: "pessoal",
+      limit: 10,
+      cursor: "c1.abc",
+      json: true
+    });
+  });
+
+  it("parses profile-picture with output", () => {
+    expect(
+      parseCliCommand(["profile-picture", "pessoal", "556784020665", "--out", "/tmp/foto.img", "--json"])
+    ).toEqual({
+      kind: "profile-picture",
+      sessionId: "pessoal",
+      chat: "556784020665",
+      out: "/tmp/foto.img",
+      json: true
+    });
+  });
+
   it("parses messages query", () => {
     expect(parseCliCommand(["messages", "pessoal", "556784020665", "--limit", "10"])).toEqual({
       kind: "messages",

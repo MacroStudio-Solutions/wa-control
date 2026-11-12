@@ -621,3 +621,99 @@ describe("local API group operation routes", () => {
     expect(calls[0]?.args).toEqual(["pessoal", "120345678901-234567890@g.us"]);
   });
 });
+
+describe("local API profile-picture and paged chats routes", () => {
+  const runtimeInfo = {
+    pid: 1,
+    startedAt: new Date().toISOString(),
+    host,
+    port: 0,
+    version: "test"
+  };
+
+  function startWith(runtime: never) {
+    const server = startLocalApiServer({
+      runtime,
+      token,
+      eventBus: new EventBus(),
+      logger: silentLogger
+    });
+    servers.push(server);
+    return server;
+  }
+
+  function get(serverPort: number | undefined, path: string) {
+    return fetch(`http://${host}:${serverPort}/sessions/pessoal/${path}`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+  }
+
+  it("found photo comes back as bytes with mime and jid headers", async () => {
+    const calls: unknown[][] = [];
+    const server = startWith({
+      runtimeInfo,
+      profilePicture: (...args: unknown[]) => {
+        calls.push(args);
+        return Promise.resolve({
+          found: true,
+          jid: "556784020665@s.whatsapp.net",
+          mimeType: "image/jpeg",
+          buffer: new Uint8Array([0xff, 0xd8, 9]),
+          fetchedAt: "2026-11-12T18:00:00.000Z",
+          cached: false
+        });
+      }
+    } as never);
+
+    const response = await get(server.port, "profile-picture?chat=556784020665");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-picture-status")).toBe("found");
+    expect(response.headers.get("x-picture-mime")).toBe("image/jpeg");
+    expect(response.headers.get("x-picture-jid")).toBe("556784020665@s.whatsapp.net");
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([0xff, 0xd8, 9]);
+    expect(calls).toEqual([["pessoal", "556784020665"]]);
+  });
+
+  it("no photo is a 200 with status none and the reason, not an error", async () => {
+    const server = startWith({
+      runtimeInfo,
+      profilePicture: () =>
+        Promise.resolve({
+          found: false,
+          jid: "556784020665@s.whatsapp.net",
+          reason: "not-authorized",
+          fetchedAt: "2026-11-12T18:00:00.000Z",
+          cached: true
+        })
+    } as never);
+
+    const response = await get(server.port, "profile-picture?chat=556784020665");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-picture-status")).toBe("none");
+    expect(response.headers.get("x-picture-reason")).toBe("not-authorized");
+    expect(response.headers.get("x-picture-cached")).toBe("true");
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  it("profile-picture without chat is CHAT_REQUIRED", async () => {
+    const server = startWith({ runtimeInfo, profilePicture: () => Promise.reject(new Error("nao")) } as never);
+    const response = await get(server.port, "profile-picture");
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("CHAT_REQUIRED");
+  });
+
+  it("chats forwards limit and cursor to the runtime", async () => {
+    const calls: unknown[][] = [];
+    const server = startWith({
+      runtimeInfo,
+      listChats: (...args: unknown[]) => {
+        calls.push(args);
+        return [];
+      }
+    } as never);
+
+    const response = await get(server.port, "chats?limit=10&cursor=c1.abc");
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([["pessoal", 10, "c1.abc"]]);
+  });
+});

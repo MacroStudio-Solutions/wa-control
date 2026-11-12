@@ -1,3 +1,8 @@
+import {
+  downloadProfilePicture,
+  ProfilePictureService,
+  type ProfilePictureResult
+} from "./profilePicture.ts";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import makeWASocket, {
@@ -147,6 +152,16 @@ function normalizeDestinationForLookup(input: string): string {
 
 export class ManagedSession {
   private socket: WASocket | null = null;
+  private readonly profilePictures = new ProfilePictureService({
+    resolveJid: (chat) => this.resolveRecipientJid(chat),
+    pictureUrl: (jid) => {
+      if (!this.socket) {
+        throw new AppError("SESSION_NOT_CONNECTED", 409, "Sessao nao conectada.");
+      }
+      return this.socket.profilePictureUrl(jid, "preview", 15_000);
+    },
+    download: (url) => downloadProfilePicture(url)
+  });
   private startPromise: Promise<void> | null = null;
   private reconnectTimer: Timer | null = null;
   private manualDisconnect = false;
@@ -491,6 +506,23 @@ export class ManagedSession {
    * `messages` e o webhook entregam). Emoji vazio remove a reacao — contrato
    * da Baileys, documentado no help da CLI.
    */
+  /**
+   * Foto de perfil (miniatura) de um contato, so leitura: cache em memoria por
+   * sessao e uma consulta ao WhatsApp por vez. "Sem foto" (inexistente ou
+   * escondida pela privacidade) e resultado, nao erro.
+   */
+  async profilePicture(chat: string): Promise<ProfilePictureResult> {
+    if (!this.socket || this.session.status !== "connected") {
+      throw new AppError(
+        "SESSION_NOT_CONNECTED",
+        409,
+        `Sessao '${this.session.id}' nao esta conectada.`
+      );
+    }
+
+    return this.profilePictures.get(chat);
+  }
+
   async reactToMessage(chat: string, messageId: string, emoji: string): Promise<ReactResponse> {
     if (!this.socket || this.session.status !== "connected") {
       throw new AppError(

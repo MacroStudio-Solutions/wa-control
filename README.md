@@ -27,6 +27,8 @@ wa daemon stop --json
 wa status
 wa sessions
 wa chats pessoal --limit 20
+wa chats pessoal --limit 20 --cursor <cursor da ultima linha>
+wa profile-picture pessoal 5511999999999 --out ./foto.jpg --json
 wa contacts pessoal --limit 20
 wa messages pessoal 5511999999999 --limit 20
 wa connect pessoal

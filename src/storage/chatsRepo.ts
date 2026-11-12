@@ -1,5 +1,51 @@
-import type { ChatRecord } from "../shared/types.ts";
+import { AppError } from "../shared/errors.ts";
+import type { ChatListItem, ChatRecord } from "../shared/types.ts";
 import type { AppDatabase } from "./db.ts";
+
+const CURSOR_PREFIX = "c1.";
+
+export interface ChatCursor {
+  sortKey: number;
+  id: string;
+}
+
+/** Cursor opaco da lista de chats: a chave de ordem e o id da linha. */
+export function encodeChatCursor(cursor: ChatCursor): string {
+  return `${CURSOR_PREFIX}${Buffer.from(JSON.stringify([cursor.sortKey, cursor.id]), "utf8").toString("base64url")}`;
+}
+
+export function decodeChatCursor(value: string): ChatCursor {
+  const invalid = () =>
+    new AppError(
+      "INVALID_CURSOR",
+      400,
+      "Cursor de `chats` invalido. Use o `cursor` de uma linha devolvida por `wa chats`."
+    );
+  if (!value.startsWith(CURSOR_PREFIX) || value.length > 1024) {
+    throw invalid();
+  }
+  const body = value.slice(CURSOR_PREFIX.length);
+  if (!/^[A-Za-z0-9_-]+$/.test(body)) {
+    throw invalid();
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    throw invalid();
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 2 ||
+    typeof parsed[0] !== "number" ||
+    !Number.isFinite(parsed[0]) ||
+    typeof parsed[1] !== "string" ||
+    parsed[1].length === 0
+  ) {
+    throw invalid();
+  }
+  return { sortKey: parsed[0], id: parsed[1] };
+}
 
 interface ChatRow {
   session_id: string;
@@ -17,6 +63,7 @@ interface ChatRow {
   last_message_text: string | null;
   last_message_timestamp: string | null;
   updated_at: string;
+  sort_key: number;
 }
 
 function mapRow(row: ChatRow): ChatRecord {
@@ -107,18 +154,41 @@ export class ChatsRepo {
     return row ? mapRow(row) : null;
   }
 
-  list(sessionId: string, limit = 50): ChatRecord[] {
-    const rows = this.db
-      .query(`
-        SELECT *
-        FROM chats
-        WHERE session_id = ?1 AND type != 'status'
-        ORDER BY COALESCE(conversation_timestamp, last_message_recv_timestamp, 0) DESC, id ASC
-        LIMIT ?2
-      `)
-      .all(sessionId, limit) as ChatRow[];
+  /**
+   * Conversas da mais recente para a mais antiga (id crescente no empate).
+   * Com `after`, so as que vem estritamente depois daquela posicao.
+   */
+  list(sessionId: string, limit = 50, after?: ChatCursor): ChatListItem[] {
+    const rows = (
+      after
+        ? this.db
+            .query(`
+              SELECT *, COALESCE(conversation_timestamp, last_message_recv_timestamp, 0) AS sort_key
+              FROM chats
+              WHERE session_id = ?1 AND type != 'status'
+                AND (
+                  COALESCE(conversation_timestamp, last_message_recv_timestamp, 0) < ?3
+                  OR (COALESCE(conversation_timestamp, last_message_recv_timestamp, 0) = ?3 AND id > ?4)
+                )
+              ORDER BY sort_key DESC, id ASC
+              LIMIT ?2
+            `)
+            .all(sessionId, limit, after.sortKey, after.id)
+        : this.db
+            .query(`
+              SELECT *, COALESCE(conversation_timestamp, last_message_recv_timestamp, 0) AS sort_key
+              FROM chats
+              WHERE session_id = ?1 AND type != 'status'
+              ORDER BY sort_key DESC, id ASC
+              LIMIT ?2
+            `)
+            .all(sessionId, limit)
+    ) as ChatRow[];
 
-    return rows.map(mapRow);
+    return rows.map((row) => ({
+      ...mapRow(row),
+      cursor: encodeChatCursor({ sortKey: row.sort_key, id: row.id })
+    }));
   }
 
   delete(sessionId: string, id: string): void {

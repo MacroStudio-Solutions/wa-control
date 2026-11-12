@@ -131,7 +131,7 @@ async function run(): Promise<void> {
     }
 
     case "chats": {
-      const chats = await client.chats(command.sessionId, command.limit);
+      const chats = await client.chats(command.sessionId, command.limit, command.cursor);
       console.log(command.json ? JSON.stringify(chats, null, 2) : renderChats(chats));
       return;
     }
@@ -241,6 +241,64 @@ async function run(): Promise<void> {
       console.log(
         `Midia enviada para ${result.jid}: ${result.kind} (${result.mimeType})${pttNote}, ${result.size} bytes${captionNote}${fileNameNote}${result.messageId ? ` (${result.messageId})` : ""}.`
       );
+      return;
+    }
+
+    case "profile-picture": {
+      const picture = await client.profilePicture(command.sessionId, command.chat);
+      if (!picture.found) {
+        if (command.json) {
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                found: false,
+                reason: picture.reason,
+                jid: picture.jid,
+                fetchedAt: picture.fetchedAt,
+                cached: picture.cached
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+        console.log(
+          picture.reason === "not-authorized"
+            ? `Sem foto de perfil visivel para ${picture.jid} (escondida pela privacidade).`
+            : `Sem foto de perfil para ${picture.jid}.`
+        );
+        return;
+      }
+
+      const target = resolveDownloadTarget(command.out, `profile-${picture.jid}`);
+      assertDirectoryWritable(target.directory);
+      assertConcreteDestination(target);
+      const destination = destinationPathFor(target, picture.mimeType, `profile-${picture.jid}`);
+      await Bun.write(destination, picture.buffer);
+
+      if (command.json) {
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              found: true,
+              jid: picture.jid,
+              mimeType: picture.mimeType,
+              size: picture.size,
+              path: destination,
+              fetchedAt: picture.fetchedAt,
+              cached: picture.cached
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+
+      console.log(`Foto de perfil de ${picture.jid}: ${picture.mimeType}, ${picture.size} bytes -> ${destination}`);
       return;
     }
 
@@ -507,6 +565,15 @@ run().catch((error) => {
         ok: false,
         code: isAppError(error) ? error.code : "INTERNAL_ERROR",
         message
+      })
+    );
+  } else if (argv[0] === "profile-picture" && argv.includes("--json")) {
+    // Erro tipado na saida padrao: quem chama separa "sem sessao", "falha do
+    // WhatsApp" e "destino inexistente" pelo codigo, nunca pelo texto.
+    console.log(
+      JSON.stringify({
+        ok: false,
+        error: { code: isAppError(error) ? error.code : "INTERNAL_ERROR", message }
       })
     );
   } else {

@@ -1,3 +1,6 @@
+import type { ChatListItem } from "../shared/types.ts";
+import { decodeChatCursor } from "../storage/chatsRepo.ts";
+import type { ProfilePictureResult } from "./profilePicture.ts";
 import { existsSync, rmSync } from "node:fs";
 import type { WAMessage } from "@whiskeysockets/baileys";
 import pkg from "../../package.json" with { type: "json" };
@@ -181,9 +184,13 @@ export class DaemonRuntime {
     return this.webhookDispatcher.listDeliveries(sessionId);
   }
 
-  listChats(sessionId: string, limit = 50): ChatRecord[] {
+  listChats(sessionId: string, limit = 50, cursor?: string): ChatListItem[] {
     this.sessions.requireSession(sessionId);
-    return this.readModel.listChats(sessionId, limit);
+    return this.readModel.listChats(
+      sessionId,
+      limit,
+      cursor === undefined ? undefined : decodeChatCursor(cursor)
+    );
   }
 
   listContacts(sessionId: string, limit = 100): ContactRecord[] {
@@ -231,6 +238,10 @@ export class DaemonRuntime {
     emoji: string
   ): Promise<ReactResponse> {
     return this.sessions.reactToMessage(sessionId, chat, messageId, emoji);
+  }
+
+  profilePicture(sessionId: string, chat: string): Promise<ProfilePictureResult> {
+    return this.sessions.profilePicture(sessionId, chat);
   }
 
   deleteMessage(
