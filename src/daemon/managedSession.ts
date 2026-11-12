@@ -837,7 +837,13 @@ export class ManagedSession {
       // e as proximas dela podem chegar sem ele.
       await rememberLidPairs(sock, extractMessageLidPairs(message), this.logger);
 
-      const normalized = normalizeIncomingMessage(this.session.id, message, authDir, true);
+      const normalized = normalizeIncomingMessage(
+        this.session.id,
+        message,
+        authDir,
+        true,
+        sock.user?.id ?? null
+      );
       if (!normalized) {
         continue;
       }

@@ -135,6 +135,11 @@ Desde o rollout de LID do WhatsApp, `chatId` costuma vir como identificador
 opaco (`@lid`) em vez do numero. Para filtrar por contato use
 `fromPhoneNumber` (so digitos) ou `from`, nunca `chatId`.
 
+`fromMe: true` marca a mensagem que a propria conta digitou no WhatsApp do
+aparelho (ou de outro dispositivo vinculado). Nela, `from` e a conta conectada e
+o contato da conversa esta em `chatPhoneNumber`/`chatId`. O que este daemon
+envia pela API nao repete aqui: continua saindo so como `message.sent`.
+
 `senderResolved` diz se o numero foi realmente descoberto. Quando ele e `false`,
 `fromPhoneNumber` e `chatPhoneNumber` vem nulos e `from` cai no identificador
 opaco — que continua estavel dentro da sessao, mas nao e o numero que o operador

@@ -339,7 +339,7 @@ export class ReadModelStore {
       senderLookupJid: senderAddress.lookupJid,
       senderPhoneNumber: senderAddress.phoneNumber,
       pushName: null,
-      fromMe: false,
+      fromMe: event.fromMe === true,
       upsertType: "notify",
       messageType: typeof event.type === "string" ? event.type : "unknown",
       text: typeof event.text === "string" ? event.text : null,
