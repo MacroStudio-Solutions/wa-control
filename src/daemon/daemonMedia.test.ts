@@ -121,6 +121,43 @@ function seedLiveMessage(fixture: ReturnType<typeof createRuntime>, raw: WAMessa
   }
 }
 
+/**
+ * Envio da loja como o ManagedSession grava a partir de 0.8.5: linha fromMe no
+ * read model e evento `message.sent` carregando o conteudo devolvido pelo
+ * `sendMessage` em `raw` — a fonte do download de midia enviada.
+ */
+function seedSentMediaMessage(
+  fixture: ReturnType<typeof createRuntime>,
+  raw: WAMessage,
+  kind: "image" | "audio"
+): void {
+  const messageId = String(raw.key?.id);
+  fixture.store.recordSentMediaMessage("pessoal", "556784020665@s.whatsapp.net", kind, null, messageId, 1_783_507_100);
+  fixture.eventsRepo.append({
+    id: crypto.randomUUID(),
+    event: "message.sent",
+    sessionId: "pessoal",
+    timestamp: 1_783_507_100,
+    messageId,
+    chatId: "556784020665@s.whatsapp.net",
+    to: "556784020665@s.whatsapp.net",
+    kind,
+    raw: raw as unknown as Record<string, unknown>
+  });
+}
+
+function rawSentMediaMessage(id: string, content: Record<string, unknown>): WAMessage {
+  return {
+    key: {
+      remoteJid: "556784020665@s.whatsapp.net",
+      fromMe: true,
+      id
+    },
+    messageTimestamp: 1_783_507_100,
+    message: content
+  } as unknown as WAMessage;
+}
+
 async function captureError(action: Promise<unknown>): Promise<unknown> {
   try {
     await action;
@@ -306,6 +343,77 @@ describe("DaemonRuntime.downloadMedia", () => {
       expect(isAppError(error)).toBe(true);
       if (isAppError(error)) {
         expect(error.code).toBe("SESSION_NOT_FOUND");
+      }
+    } finally {
+      fixture.db.close();
+    }
+  });
+
+  it("baixa midia ENVIADA pela loja a partir do conteudo guardado pelo envio", async () => {
+    const fixture = createRuntime();
+    try {
+      seedSentMediaMessage(
+        fixture,
+        rawSentMediaMessage("3EB0SENTIMG", {
+          imageMessage: {
+            mimetype: "image/jpeg",
+            caption: "olha isso",
+            fileLength: 3,
+            mediaKey: new Uint8Array([9, 8, 7]),
+            directPath: "/v/t62.sent"
+          }
+        }),
+        "image"
+      );
+      seedSentMediaMessage(
+        fixture,
+        rawSentMediaMessage("3EB0SENTAUD", {
+          audioMessage: {
+            mimetype: "audio/ogg; codecs=opus",
+            ptt: true,
+            fileLength: 3,
+            mediaKey: new Uint8Array([9, 8, 7]),
+            directPath: "/v/t62.sent-audio"
+          }
+        }),
+        "audio"
+      );
+
+      const image = await fixture.runtime.downloadMedia("pessoal", "556784020665", "3EB0SENTIMG");
+      expect(image.record.fromMe).toBe(true);
+      expect(image.download.kind).toBe("image");
+      expect(image.download.mimeType).toBe("image/jpeg");
+      expect(Array.from(image.download.buffer)).toEqual([1, 2, 3]);
+
+      const audio = await fixture.runtime.downloadMedia("pessoal", "556784020665", "3EB0SENTAUD");
+      expect(audio.record.fromMe).toBe(true);
+      expect(audio.download.kind).toBe("audio");
+      expect(audio.download.mimeType).toBe("audio/ogg; codecs=opus");
+    } finally {
+      fixture.db.close();
+    }
+  });
+
+  it("envio antigo sem conteudo guardado vira MEDIA_PAYLOAD_UNAVAILABLE com o motivo de envio", async () => {
+    const fixture = createRuntime();
+    try {
+      fixture.store.recordSentMediaMessage(
+        "pessoal",
+        "556784020665@s.whatsapp.net",
+        "image",
+        null,
+        "3EB0OLDSENT",
+        1_783_507_100
+      );
+
+      const error = (await captureError(
+        fixture.runtime.downloadMedia("pessoal", "556784020665", "3EB0OLDSENT")
+      )) as Error;
+
+      expect(isAppError(error)).toBe(true);
+      if (isAppError(error)) {
+        expect(error.code).toBe("MEDIA_PAYLOAD_UNAVAILABLE");
+        expect(error.message).toContain("envio anterior");
       }
     } finally {
       fixture.db.close();

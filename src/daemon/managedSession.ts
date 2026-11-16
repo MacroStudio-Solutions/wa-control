@@ -302,11 +302,16 @@ export class ManagedSession {
         timestamp: nowUnix()
       };
 
+      // O `raw` guarda o conteudo devolvido pelo envio — e o que permite, mais
+      // tarde, baixar a midia enviada (`download-media` acha o payload no
+      // journal de eventos). O `stripRawFromEvent` mantem ele fora de webhooks
+      // e do stream de eventos.
       this.publisher.create("message.sent", this.session.id, {
         messageId: response.messageId,
         chatId: jid,
         to: jid,
-        text
+        text,
+        ...(sent ? { raw: sent as unknown as Record<string, unknown> } : {})
       });
       this.readModel.recordSentTextMessage(
         this.session.id,
@@ -385,7 +390,10 @@ export class ManagedSession {
         mimeType: media.mimeType,
         ...(media.caption ? { text: media.caption } : {}),
         ...(media.fileName ? { fileName: media.fileName } : {}),
-        ptt: response.ptt
+        ptt: response.ptt,
+        // Conteudo devolvido pelo envio: e o que faz a foto e o audio da loja
+        // abrirem depois de recarregar (download-media resolve pelo journal).
+        ...(sent ? { raw: sent as unknown as Record<string, unknown> } : {})
       });
       this.readModel.recordSentMediaMessage(
         this.session.id,
@@ -624,7 +632,8 @@ export class ManagedSession {
         chatId: jid,
         to: jid,
         kind: "poll",
-        text: question
+        text: question,
+        ...(sent ? { raw: sent as unknown as Record<string, unknown> } : {})
       });
       this.readModel.recordSentMediaMessage(
         this.session.id,

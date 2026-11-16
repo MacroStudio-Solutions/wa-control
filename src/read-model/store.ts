@@ -533,12 +533,17 @@ export class ReadModelStore {
         continue;
       }
 
+      // O `messageTimestamp` que o Baileys poe num `messages.update` e a hora
+      // do AVISO (ack de entregue/lido), nao a hora da mensagem: gravar ele
+      // trocava o horario da linha e, com empate, a ordem da conversa. O
+      // horario vem sempre do registro existente — o update nunca muda o
+      // horario, nem de mensagem enviada nem de recebida.
       const partial = this.normalizeSocketMessage(
         sessionId,
         {
           key: update.key,
           message: update.update?.message,
-          messageTimestamp: update.update?.messageTimestamp ?? existing.unixSeconds ?? undefined,
+          messageTimestamp: existing.unixSeconds ?? undefined,
           status: update.update?.status as WAMessage["status"]
         } as WAMessage,
         existing.upsertType
@@ -551,6 +556,10 @@ export class ReadModelStore {
       // quando a atualizacao traz extracao informativa.
       const informativeContent = partial !== null && partial.messageType !== "unknown";
 
+      // Espalhar o partial manteria `unixSeconds`/`timestamp` derivados do
+      // normalize — com hora nula o `timestamp` viraria o agora da escrita.
+      // Fixados os dois nos valores do registro: o update so muda situacao
+      // (status) e, quando a extracao e informativa, o conteudo.
       this.messagesRepo.upsert({
         ...existing,
         ...(partial ?? {}),
@@ -561,6 +570,8 @@ export class ReadModelStore {
               text: existing.text,
               rawMessageType: existing.rawMessageType
             }),
+        unixSeconds: existing.unixSeconds,
+        timestamp: existing.timestamp,
         status:
           update.update?.status === undefined || update.update?.status === null
             ? existing.status
