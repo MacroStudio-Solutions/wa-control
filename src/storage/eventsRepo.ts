@@ -90,16 +90,18 @@ export class EventsRepo {
   }
 
   /**
-   * Eventos `message.received` ao vivo guardam o payload bruto do Baileys;
-   * midia de history-sync nao gera evento — para ela devolvemos null e o
-   * pipeline de download classifica MEDIA_PAYLOAD_UNAVAILABLE.
+   * Payload bruto para o download de midia: `message.received` ao vivo guardam
+   * o payload bruto do Baileys e `message.sent` guardam o conteudo devolvido
+   * pelo envio (`sendMessage`) — e o que deixa baixar tambem a midia enviada
+   * pela loja. Midia de history-sync nao gera evento — para ela devolvemos
+   * null e o pipeline de download classifica MEDIA_PAYLOAD_UNAVAILABLE.
    */
   findMessageRawPayload(sessionId: string, messageId: string): NormalizedEvent | null {
     const row = this.db
       .query(`
         SELECT *
         FROM events
-        WHERE event_name = 'message.received'
+        WHERE event_name IN ('message.received', 'message.sent')
           AND session_id = ?1
           AND json_extract(payload_json, '$.messageId') = ?2
         ORDER BY created_at DESC, id DESC

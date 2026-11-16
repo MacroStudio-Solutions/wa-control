@@ -263,6 +263,122 @@ describe("read model store", () => {
     }
   });
 
+  it("aviso de lido com hora posterior nao altera o horario da mensagem, nem enviada nem recebida", () => {
+    const { db, store } = createFixture();
+
+    try {
+      const handlers: Record<string, (payload: unknown) => void> = {};
+      const sock = {
+        ev: {
+          on: (name: string, handler: (payload: never) => void) => {
+            handlers[name] = handler as (payload: unknown) => void;
+          }
+        }
+      };
+      store.bindSocket("pessoal", sock as unknown as never);
+
+      store.upsertSocketMessage(
+        "pessoal",
+        {
+          key: { remoteJid: "556784020665@s.whatsapp.net", fromMe: false, id: "recv-1" },
+          pushName: "Priscila",
+          messageTimestamp: 1_783_506_977,
+          message: { conversation: "Bom dia" }
+        } as unknown as WAMessage,
+        "notify"
+      );
+      store.recordSentTextMessage(
+        "pessoal",
+        "556784020665@s.whatsapp.net",
+        "Resposta",
+        "sent-1",
+        1_783_507_000
+      );
+
+      const applyUpdate = handlers["messages.update"];
+      expect(applyUpdate).toBeDefined();
+
+      // O ack do Baileys poe em `messageTimestamp` a hora do AVISO de
+      // entregue/lido, nao a hora da mensagem — o bug que trocava o horario
+      // das linhas e embaralhava a ordem da conversa.
+      applyUpdate?.([
+        {
+          key: { remoteJid: "556784020665@s.whatsapp.net", fromMe: false, id: "recv-1" },
+          update: { status: 3, messageTimestamp: 1_783_507_900 }
+        },
+        {
+          key: { remoteJid: "556784020665@s.whatsapp.net", fromMe: true, id: "sent-1" },
+          update: { status: 4, messageTimestamp: 1_783_507_900 }
+        }
+      ]);
+
+      const received = store
+        .listMessages("pessoal", "556784020665", 10)
+        .find((message) => message.id === "recv-1");
+      const sent = store
+        .listMessages("pessoal", "556784020665", 10)
+        .find((message) => message.id === "sent-1");
+
+      expect(received?.unixSeconds).toBe(1_783_506_977);
+      expect(received?.timestamp).toBe(new Date(1_783_506_977 * 1000).toISOString());
+      expect(sent?.unixSeconds).toBe(1_783_507_000);
+      expect(sent?.timestamp).toBe(new Date(1_783_507_000 * 1000).toISOString());
+      expect(received?.status).toBe("3");
+      expect(sent?.status).toBe("4");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ordem de 4 enviadas com horas diferentes fica certa depois dos avisos de lido", () => {
+    const { db, store } = createFixture();
+
+    try {
+      const handlers: Record<string, (payload: unknown) => void> = {};
+      const sock = {
+        ev: {
+          on: (name: string, handler: (payload: never) => void) => {
+            handlers[name] = handler as (payload: unknown) => void;
+          }
+        }
+      };
+      store.bindSocket("pessoal", sock as unknown as never);
+
+      // O caso real do defeito: foto, audio, texto e menu do robo enviados em
+      // minutos diferentes, todos com o horario trocado pela hora do mesmo
+      // aviso de lido. Os ids escolhidos fazem o desempate por id devolver a
+      // ordem invertida quando as horas empatao — so com as horas certas a
+      // ordem do WhatsApp se sustenta.
+      const foto = 1_794_782_923;
+      const audio = foto + 14;
+      const texto = foto + 26;
+      const menu = foto + 275;
+      const avisoDeLido = foto + 351;
+
+      store.recordSentMediaMessage("pessoal", "556784020665@s.whatsapp.net", "image", "olha isso", "ZZZ1", foto);
+      store.recordSentMediaMessage("pessoal", "556784020665@s.whatsapp.net", "audio", null, "YYY2", audio);
+      store.recordSentTextMessage("pessoal", "556784020665@s.whatsapp.net", "texto", "XXX3", texto);
+      store.recordSentTextMessage("pessoal", "556784020665@s.whatsapp.net", "menu", "WWW4", menu);
+
+      const applyUpdate = handlers["messages.update"];
+      expect(applyUpdate).toBeDefined();
+
+      applyUpdate?.(
+        ["ZZZ1", "YYY2", "XXX3", "WWW4"].map((id) => ({
+          key: { remoteJid: "556784020665@s.whatsapp.net", fromMe: true, id },
+          update: { status: 4, messageTimestamp: avisoDeLido }
+        }))
+      );
+
+      const messages = store.listMessages("pessoal", "556784020665", 10);
+
+      expect(messages.map((message) => message.id)).toEqual(["WWW4", "XXX3", "YYY2", "ZZZ1"]);
+      expect(messages.map((message) => message.unixSeconds)).toEqual([menu, texto, audio, foto]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("records a sent media message with the media kind and caption as text", () => {
     const { db, store } = createFixture();
 

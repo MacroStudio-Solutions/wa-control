@@ -99,14 +99,14 @@ Notas:
   incerto — a midia PODE ter sido enviada; conferir \`wa messages <sessionId>
   <numero>\` antes de reenviar para nao duplicar. Tipos fora da whitelist
   (sticker) respondem MEDIA_TYPE_NOT_SUPPORTED_YET com os tipos liberados.
-  download-media grava a midia de uma mensagem recebida (a mesma referencia
-  chat + messageId que messages e o webhook entregam). Com --out grava no
-  caminho dado; sem --out, no diretorio corrente como <messageId>.<extensao
-  pelo MIME> — video mp4 baixa como .mp4. Midia de history-sync nao tem
-  payload bruto guardado e responde
-   MEDIA_PAYLOAD_UNAVAILABLE — peca o reenvio do arquivo; midia expirada
-   responde DOWNLOAD_FAILED, sem retry automatico. Download e read-only: nada
-   e transmitido ao WhatsApp; exit 0/1.
+  download-media grava a midia de uma mensagem recebida ou enviada pela loja (a
+  mesma referencia chat + messageId que messages e o webhook entregam). Com
+  --out grava no caminho dado; sem --out, no diretorio corrente como
+  <messageId>.<extensao pelo MIME> — video mp4 baixa como .mp4. Midia sem
+  payload bruto guardado (history-sync ou envio antigo, anterior ao guardado do
+  conteudo do envio) responde MEDIA_PAYLOAD_UNAVAILABLE — peca o reenvio do
+  arquivo; midia expirada responde DOWNLOAD_FAILED, sem retry automatico.
+  Download e read-only: nada e transmitido ao WhatsApp; exit 0/1.
    chats lista da conversa mais recente para a mais antiga; cada linha traz um
    cursor opaco, e --cursor <cursor da ultima linha> devolve a pagina seguinte
    sem repetir conversa mesmo que uma nova suba ao topo entre as paginas.

@@ -11,6 +11,7 @@ import { openDatabase } from "../storage/db.ts";
 import { EventsRepo } from "../storage/eventsRepo.ts";
 import { MessagesRepo } from "../storage/messagesRepo.ts";
 import { SessionsRepo } from "../storage/sessionsRepo.ts";
+import { repairMessageTimestampsFromEvents } from "../storage/timestampRepair.ts";
 import { WebhookDeliveriesRepo } from "../storage/webhookDeliveriesRepo.ts";
 import { WebhooksRepo } from "../storage/webhooksRepo.ts";
 import { DaemonRuntime, buildRuntimeFileRecord, createDaemonRuntimeInfo } from "./daemonRuntime.ts";
@@ -51,6 +52,12 @@ async function bootDaemon(
   }
 
   const db = openDatabase(config.paths.databasePath);
+
+  // Correcao unica de horarios antigos gravados errados pelo bug do ack:
+  // idempotente, roda a cada subida e registra quantas linhas corrigiu.
+  const repaired = repairMessageTimestampsFromEvents(db);
+  logger.info("correcao de horarios de mensagens", { linhasCorrigidas: repaired });
+
   const readModel = new ReadModelStore(
     config,
     new ChatsRepo(db),

@@ -24,21 +24,27 @@ export interface IncomingMediaDownload {
 
 export interface DownloadIncomingMediaInput {
   record: MessageRecord;
-  /** Payload bruto do Baileys; ausente em midia de history-sync. */
+  /** Payload bruto do Baileys (recebida) ou conteudo devolvido pelo envio (enviada); ausente em midia de history-sync e em envio anterior ao guardado. */
   raw: WAMessage | null;
   fetchMedia: MediaFetcher;
 }
 
 function payloadUnavailableReason(record: MessageRecord): string {
-  return record.upsertType === "history"
-    ? "history-sync"
+  if (record.upsertType === "history") {
+    return "history-sync";
+  }
+
+  return record.fromMe
+    ? "envio anterior ao guardado do conteudo original"
     : "mensagem sem payload bruto guardado";
 }
 
 /**
- * Caminho de download do pipeline de midia: classificacao ANTES do fetch
- * (payload ausente, nao-midia, tipo nao liberado) e so entao o fetch — que
- * classifica a propria falha (timeout, midia expirada) via createMediaFetcher.
+ * Caminho de download do pipeline de midia — para mensagens recebidas e
+ * enviadas (o payload do envio vem do conteudo devolvido por `sendMessage`):
+ * classificacao ANTES do fetch (payload ausente, nao-midia, tipo nao liberado)
+ * e so entao o fetch — que classifica a propria falha (timeout, midia expirada)
+ * via createMediaFetcher.
  */
 export async function downloadIncomingMedia(
   input: DownloadIncomingMediaInput
