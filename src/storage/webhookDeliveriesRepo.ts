@@ -35,14 +35,21 @@ function mapRow(row: DeliveryRow): WebhookDeliveryRecord {
 export class WebhookDeliveriesRepo {
   constructor(private readonly db: AppDatabase) {}
 
-  create(input: Omit<WebhookDeliveryRecord, "id" | "createdAt">): WebhookDeliveryRecord {
+  /**
+   * Grava uma tentativa de entrega. Devolve null, sem gravar, quando o webhook
+   * ja foi removido: a ponte troca o webhook a cada partida e o historico some
+   * junto (ON DELETE CASCADE), entao uma tentativa tardia nao tem a quem
+   * pertencer. O EXISTS roda no mesmo comando do INSERT, sem janela entre a
+   * checagem e a gravacao, e a chave estrangeira continua valendo para o resto.
+   */
+  create(input: Omit<WebhookDeliveryRecord, "id" | "createdAt">): WebhookDeliveryRecord | null {
     const record: WebhookDeliveryRecord = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
       ...input
     };
 
-    this.db
+    const result = this.db
       .query(`
         INSERT INTO webhook_deliveries (
           id,
@@ -57,7 +64,8 @@ export class WebhookDeliveriesRepo {
           created_at,
           response_body
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+        WHERE EXISTS (SELECT 1 FROM webhooks WHERE id = ?2)
       `)
       .run(
         record.id,
@@ -73,7 +81,7 @@ export class WebhookDeliveriesRepo {
         record.responseBody
       );
 
-    return record;
+    return result.changes > 0 ? record : null;
   }
 
   list(sessionId?: string, limit = 50): WebhookDeliveryRecord[] {
