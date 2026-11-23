@@ -8,6 +8,7 @@ import { EventBus } from "./eventBus.ts";
 import { EventPublisher } from "./eventPublisher.ts";
 
 const MAX_RESPONSE_BODY = 2000;
+const WEBHOOK_REMOVED_MESSAGE = "webhook removido durante a entrega; tentativa descartada";
 
 function truncateResponseBody(value: string): string {
   return value.length > MAX_RESPONSE_BODY ? value.slice(0, MAX_RESPONSE_BODY) : value;
@@ -70,6 +71,11 @@ export class WebhookDispatcher {
     event: NormalizedEvent,
     attempt: number
   ): Promise<void> {
+    if (attempt > 1 && !this.webhooksRepo.get(webhook.id)) {
+      this.logWebhookRemoved(webhook, attempt);
+      return;
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), webhook.timeoutMs);
 
@@ -93,7 +99,7 @@ export class WebhookDispatcher {
         throw new Error(`Webhook respondeu ${response.status}`);
       }
 
-      this.deliveriesRepo.create({
+      const stored = this.deliveriesRepo.create({
         webhookId: webhook.id,
         sessionId: webhook.sessionId,
         eventId: event.id,
@@ -104,6 +110,11 @@ export class WebhookDispatcher {
         error: null,
         responseBody
       });
+
+      if (!stored) {
+        this.logWebhookRemoved(webhook, attempt);
+        return;
+      }
 
       this.webhooksRepo.markAttemptResult(webhook.id, "delivered", null);
     } catch (error) {
@@ -117,7 +128,7 @@ export class WebhookDispatcher {
         error: message
       });
 
-      this.deliveriesRepo.create({
+      const stored = this.deliveriesRepo.create({
         webhookId: webhook.id,
         sessionId: webhook.sessionId,
         eventId: event.id,
@@ -128,6 +139,11 @@ export class WebhookDispatcher {
         error: message,
         responseBody
       });
+
+      if (!stored) {
+        this.logWebhookRemoved(webhook, attempt);
+        return;
+      }
 
       this.webhooksRepo.markAttemptResult(webhook.id, "failed", message);
 
@@ -151,5 +167,18 @@ export class WebhookDispatcher {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  /**
+   * O webhook foi removido ou substituido enquanto a entrega estava em curso
+   * (a ponte registra um novo a cada partida). Nao ha historico a gravar nem
+   * tentativa a repetir: a entrega e encerrada, mas o fato fica no log.
+   */
+  private logWebhookRemoved(webhook: WebhookRecord, attempt: number): void {
+    this.logger.info(WEBHOOK_REMOVED_MESSAGE, {
+      webhookId: webhook.id,
+      sessionId: webhook.sessionId,
+      attempt
+    });
   }
 }
