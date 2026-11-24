@@ -32,6 +32,24 @@ describe("parseCliCommand", () => {
     });
   });
 
+  it("parses connect-new, which owns the session name", () => {
+    expect(parseCliCommand(["connect-new"])).toEqual({
+      kind: "connect.new",
+      json: false
+    });
+
+    expect(parseCliCommand(["connect-new", "--json"])).toEqual({
+      kind: "connect.new",
+      json: true
+    });
+  });
+
+  it("rejects connect-new with a stray session name", () => {
+    expect(() => parseCliCommand(["connect-new", "principal"])).toThrow(
+      /wa connect-new/
+    );
+  });
+
   it("parses listen --all", () => {
     expect(parseCliCommand(["listen", "--all"])).toEqual({
       kind: "listen",
