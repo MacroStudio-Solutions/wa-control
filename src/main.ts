@@ -16,6 +16,7 @@ import {
 import { STATUS_PROBE_TIMEOUT_MS, collectStatusReport } from "./cli/localStatus.ts";
 import { pruneHistory } from "./cli/historyPrune.ts";
 import { parseCliCommand } from "./cli/router.ts";
+import { nextFreeSessionName } from "./cli/sessionName.ts";
 import { resolveSendMediaSource } from "./cli/sendMediaSource.ts";
 import {
   renderChats,
@@ -150,6 +151,24 @@ async function run(): Promise<void> {
 
     case "connect": {
       const result = await client.connect(command.sessionId);
+      if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      if (result.qrTerminal) {
+        console.log(result.qrTerminal);
+      }
+      console.log(`Sessao '${result.session.id}' preparada. ${result.note ?? ""}`.trim());
+      return;
+    }
+
+    case "connect.new": {
+      // O proximo nome livre (principal, session-2, ...) nasce aqui, no
+      // programa: a tela nao monta casca de shell para escolher.
+      const sessions = await client.sessions();
+      const sessionId = nextFreeSessionName(sessions.map((session) => session.id));
+      const result = await client.connect(sessionId);
       if (command.json) {
         console.log(JSON.stringify(result, null, 2));
         return;
@@ -570,6 +589,15 @@ run().catch((error) => {
   } else if (argv[0] === "profile-picture" && argv.includes("--json")) {
     // Erro tipado na saida padrao: quem chama separa "sem sessao", "falha do
     // WhatsApp" e "destino inexistente" pelo codigo, nunca pelo texto.
+    console.log(
+      JSON.stringify({
+        ok: false,
+        error: { code: isAppError(error) ? error.code : "INTERNAL_ERROR", message }
+      })
+    );
+  } else if (argv[0] === "connect-new" && argv.includes("--json")) {
+    // A tela do Studio le a ultima linha de stdout como envelope {ok:false} e
+    // mostra error.message ao lojista — em portugues, no lugar do botao parado.
     console.log(
       JSON.stringify({
         ok: false,

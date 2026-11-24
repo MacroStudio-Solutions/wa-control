@@ -31,6 +31,7 @@ Uso:
   wa contacts <sessionId> [--limit 100] [--json]
   wa messages <sessionId> <chat|jid|numero> [--limit 50] [--json]
   wa connect <sessionId> [--json]
+  wa connect-new [--json]
   wa qr <sessionId> [--json] [--base64]
   wa disconnect <sessionId>
   wa session remove <sessionId> --yes
@@ -86,6 +87,10 @@ Notas:
   registra no daemon.log se a parada foi graciosa ou forcada. Sai com 1 apenas se
   nao conseguir confirmar a morte.
   connect exibe QR quando necessario e restaura sessoes persistidas.
+  connect-new cria a sessao com o proximo nome livre (principal, session-2,
+  session-3, ...) e conecta: a escolha do nome vive no programa, sem casca de
+  shell — funciona igual no Windows sem bash. Com --json, a falha responde o
+  envelope {ok:false, error:{code, message}} em uma unica linha de stdout.
   qr le o QR corrente sem abrir conexao: ascii no terminal, PNG em base64 com
   --base64 e o data URL pronto para exibir com --json.
   send-media envia imagem, audio, video e documento: o tipo e inferido da

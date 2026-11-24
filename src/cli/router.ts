@@ -15,6 +15,7 @@ export type CliCommand =
   | { kind: "contacts"; sessionId: string; limit: number; json: boolean }
   | { kind: "messages"; sessionId: string; chat: string; limit: number; json: boolean }
   | { kind: "connect"; sessionId: string; json: boolean }
+  | { kind: "connect.new"; json: boolean }
   | { kind: "qr"; sessionId: string; json: boolean; base64: boolean }
   | { kind: "disconnect"; sessionId: string }
   | { kind: "session.remove"; sessionId: string; yes: boolean }
@@ -269,6 +270,18 @@ export function parseCliCommand(argv: string[]): CliCommand {
       limit: extractNumberFlag(argv, "--limit") ?? 50,
       json
     };
+  }
+
+  if (filtered[0] === "connect-new") {
+    if (filtered.length > 1) {
+      throw new AppError(
+        "INVALID_COMMAND",
+        400,
+        "Uso: wa connect-new [--json] — o nome da sessao e escolhido sozinho (principal, session-2, ...)."
+      );
+    }
+
+    return { kind: "connect.new", json };
   }
 
   if (filtered[0] === "connect" && filtered[1]) {
